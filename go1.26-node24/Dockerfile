@@ -17,6 +17,11 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 ARG GO_VERSION=1.26.3
 ARG NODE_VERSION=24.16.0
 
+# Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
+# Point it at the persistent toolcache we pre-seed below so setup-go /
+# setup-node hit "Found in cache".
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+
 USER root
 
 # 1) C toolchain + common build deps + docker CLI (the daemon lives in a
