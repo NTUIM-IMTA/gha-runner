@@ -1,0 +1,23 @@
+# Override values for the gha-runner-scale-set chart
+# (oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set)
+#
+# Usage:
+#   helm upgrade --install my-runners \
+#     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+#     -n arc-runners \
+#     -f values.yaml
+
+# Keep all existing githubConfigUrl / githubConfigSecret settings the chart already has.
+# Only override the runner pod template to swap the image.
+
+template:
+  spec:
+    containers:
+      - name: runner
+        # Replace with the image you pushed (see README in this folder).
+        image: ghcr.io/ntuim-imta/arc-runner:latest
+        imagePullPolicy: Always
+        command: ["/home/runner/run.sh"]
+        # If your repo is private and ghcr.io needs auth, add:
+        # imagePullSecrets:
+        #   - name: ghcr-pull-secret
