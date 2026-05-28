@@ -156,11 +156,34 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"   # must match a `<ver>` folder in this repo
+          cache: false         # use in-cluster Athens instead — see below
       - run: cd backend && go test -race -cover ./...
 ```
 
 Nothing repo-specific — every workflow under `NTUIM-IMTA` just sets
 `runs-on: my-runners`.
+
+### Why `cache: false`
+
+The runner pod has `GOPROXY` pointing at the in-cluster Athens proxy
+(`http://athens.athens.svc.cluster.local:3000`). `go mod download` therefore
+fetches modules from inside the cluster (Gbps) on every job — usually a few
+seconds for our codebases.
+
+The default `cache: true` would instead make `setup-go` use `actions/cache`,
+which restores a GOMODCACHE tarball from GitHub's hosted cache server. That
+crosses the public internet and was measured at ~25-30s per job for a 150 MB
+tarball. Skipping it and going straight to Athens is faster and removes one
+moving part.
+
+`GOPROXY` is set with a fallback chain:
+
+```
+http://athens.../, https://proxy.golang.org, direct
+```
+
+so if Athens is down or hasn't seen a module before, the job still finishes
+by hitting upstream directly.
 
 ## Bumping Go / Node
 
