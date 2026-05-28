@@ -9,7 +9,8 @@
 
 ## Single-node k3s has limited headroom: each runner pod also brings a
 ## privileged dind sidecar, so concurrent jobs scale at ~2x the pod count.
-maxRunners: 4
+## Watch node CPU / memory under load before bumping further.
+maxRunners: 8
 
 ## Outbound HTTP traffic from runner / dind / initContainer goes through the
 ## campus Squid forward proxy. The chart wires HTTP_PROXY / HTTPS_PROXY /

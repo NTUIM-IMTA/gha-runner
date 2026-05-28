@@ -94,14 +94,56 @@ helm upgrade my-runners \
 (`githubConfigUrl`, `githubConfigSecret`, `runnerGroup`). What `values.yaml`
 adds on top:
 
-- `maxRunners: 4` — cap concurrent runner pods (each one also spawns a dind
-  sidecar, so total container budget is ~8)
+- `maxRunners: 8` — cap concurrent runner pods (each one also spawns a dind
+  sidecar, so total container budget is ~2x this)
 - `containerMode.type: dind` — chart auto-injects the `dind` sidecar,
   `/var/run` shared volume, `DOCKER_HOST` env, etc.
+- `proxy:` — runner / dind / initContainer egress goes through the campus
+  Squid forward proxy at `140.112.106.22:3128`
 - `template.spec.containers[0].image` — our custom image
 
 In-flight runner pods finish their current job and exit; ARC spawns new ones
 from the new spec.
+
+## Tuning knobs
+
+All knobs live in `values.yaml`; after every edit run the `helm upgrade`
+command above.
+
+### Concurrency (`maxRunners`)
+
+Each in-flight job costs two containers on the node (runner + dind sidecar)
+plus the toolcache image overhead. Rough budget on the current single-node
+k3s (`gh-runner`):
+
+| `maxRunners` | Peak pods | When to use |
+|---|---|---|
+| 2 | ~4 | Diagnosing OOM / heavy app build jobs |
+| 4 | ~8 | Default for everyday CI |
+| 8 | ~16 | Multiple repos pushing in parallel — current setting |
+| 16+ | risky | Only if node was scaled up |
+
+Watch `kubectl top node gh-runner` while several runs are queued; bump down
+if memory pressure shows.
+
+### Egress proxy
+
+The whole `proxy:` block in `values.yaml`. To bypass Squid temporarily, comment
+the block out and `helm upgrade`. To add a host that should never go through
+Squid, append it to `proxy.noProxy`. Examples already in place:
+
+- `10.0.0.0/8`, `.svc`, `.cluster.local`, `localhost` — cluster-internal
+- `140.112.0.0/16` — campus subnet
+- `ghcr.io`, `github.com`, `api.github.com` — direct upstream so image pulls
+  and the runner registration API skip Squid
+
+The chart injects `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` (both upper- and
+lowercase forms) into runner + dind + initContainer + listener. Confirm
+inside a running pod with:
+
+```bash
+kubectl -n arc-runners exec <runner-pod> -c runner -- env | grep -i proxy
+```
 
 ## Use it from a workflow
 
