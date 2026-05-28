@@ -7,6 +7,10 @@
 #   runnerGroup:        gh-runner
 # Use `--reuse-values -f values.yaml` so those stay intact.
 
+## Single-node k3s has limited headroom: each runner pod also brings a
+## privileged dind sidecar, so concurrent jobs scale at ~2x the pod count.
+maxRunners: 4
+
 ## containerMode dind injects a docker:dind sidecar + shared /var/run,
 ## so `docker/setup-buildx-action` and any plain `docker build` work
 ## from inside the runner.
