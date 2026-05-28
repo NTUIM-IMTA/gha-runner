@@ -5,6 +5,10 @@
 #   hit "Found in cache" instead of downloading every run
 FROM ghcr.io/actions/actions-runner:latest
 
+# Link the GHCR package to this repo so it shows up under
+# https://github.com/NTUIM-IMTA/gha-runner/pkgs/container/gha-runner
+LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
+
 # Bump these when workflows pin a newer minor/patch.
 # Must be a full semver that satisfies the workflow's `go-version: "1.26"`
 # and `node-version: 24` constraints.
