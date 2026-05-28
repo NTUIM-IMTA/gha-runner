@@ -1,0 +1,91 @@
+# In-cluster Go module proxy (https://github.com/gomods/athens)
+#
+# Apply: kubectl apply -f athens.yaml
+# Runners use it via GOPROXY env (set in gha-runner values.yaml).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: athens
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: athens-storage
+  namespace: athens
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: athens
+  namespace: athens
+  labels:
+    app: athens
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: athens
+  template:
+    metadata:
+      labels:
+        app: athens
+    spec:
+      containers:
+        - name: athens
+          image: gomods/athens:v0.17.1
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: ATHENS_STORAGE_TYPE
+              value: disk
+            - name: ATHENS_DISK_STORAGE_ROOT
+              value: /var/lib/athens
+            ## sync mode = block module request until upstream fetch is done;
+            ## async streams partial data. sync is simpler to reason about.
+            - name: ATHENS_DOWNLOAD_MODE
+              value: sync
+            - name: ATHENS_GO_BINARY_ENV_VARS
+              value: "GOPROXY=https://proxy.golang.org,direct"
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/athens
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: athens-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: athens
+  namespace: athens
+spec:
+  type: ClusterIP
+  selector:
+    app: athens
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

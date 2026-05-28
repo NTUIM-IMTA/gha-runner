@@ -47,4 +47,11 @@ template:
         image: ghcr.io/ntuim-imta/gha-runner:go1.26-node24
         imagePullPolicy: Always
         command: ["/home/runner/run.sh"]
+        env:
+          ## Route `go mod download` through the in-cluster Athens proxy.
+          ## Unlike ACTIONS_RESULTS_URL, GOPROXY is read by the Go toolchain
+          ## directly, so Runner.Worker doesn't overwrite it.
+          ## Fallback chain: in-cluster → upstream → direct.
+          - name: GOPROXY
+            value: http://athens.athens.svc.cluster.local:3000,https://proxy.golang.org,direct
         # If the package is private, add an imagePullSecret here.
