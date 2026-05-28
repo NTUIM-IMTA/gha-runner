@@ -42,7 +42,11 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
       docker-ce-cli \
       docker-buildx-plugin; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*; \
+    # yq (mikefarah, Go) — used by build-image workflow to edit Helm chart values
+    curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+      -o /usr/local/bin/yq; \
+    chmod +x /usr/local/bin/yq
 
 # 2) Pre-seed toolcache using the exact tarballs setup-go / setup-node download.
 #    Cluster is linux/amd64; the GitHub toolcache arch label for x86_64 is "x64".
