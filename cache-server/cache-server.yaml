@@ -47,6 +47,10 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            ## Must match the URL runners use (ACTIONS_RESULTS_URL in
+            ## gha-runner values.yaml).
+            - name: API_BASE_URL
+              value: http://actions-cache-server.actions-cache.svc.cluster.local:3000
             - name: STORAGE_DRIVER
               value: filesystem
             - name: STORAGE_FILESYSTEM_PATH
