@@ -1,0 +1,88 @@
+# In-cluster GitHub Actions cache server
+# https://github.com/falcondev-oss/github-actions-cache-server
+#
+# Apply: kubectl apply -f cache-server.yaml
+# Runners point at this via ACTIONS_RESULTS_URL (set in gha-runner values.yaml).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: actions-cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cache-data
+  namespace: actions-cache
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: actions-cache-server
+  namespace: actions-cache
+  labels:
+    app: actions-cache-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: actions-cache-server
+  template:
+    metadata:
+      labels:
+        app: actions-cache-server
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/falcondev-oss/github-actions-cache-server:v9.4.7
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: STORAGE_DRIVER
+              value: filesystem
+            - name: STORAGE_FILESYSTEM_PATH
+              value: /app/.data
+            - name: CACHE_CLEANUP_OLDER_THAN_DAYS
+              value: "30"
+          volumeMounts:
+            - name: data
+              mountPath: /app/.data
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cache-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: actions-cache-server
+  namespace: actions-cache
+spec:
+  type: ClusterIP
+  selector:
+    app: actions-cache-server
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

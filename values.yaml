@@ -20,4 +20,9 @@ template:
         image: ghcr.io/ntuim-imta/gha-runner:go1.26-node24
         imagePullPolicy: Always
         command: ["/home/runner/run.sh"]
+        env:
+          ## Route actions/cache (and setup-go/setup-node implicit cache) to
+          ## the in-cluster cache server instead of GitHub's. See cache-server/.
+          - name: ACTIONS_RESULTS_URL
+            value: http://actions-cache-server.actions-cache.svc.cluster.local:3000/
         # If the package is private, add an imagePullSecret here.
