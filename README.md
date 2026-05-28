@@ -11,6 +11,8 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 │   └── Dockerfile
 ├── athens/          # in-cluster Go module proxy manifest
 │   └── athens.yaml
+├── verdaccio/       # in-cluster npm / pnpm registry mirror manifest
+│   └── verdaccio.yaml
 ├── values.yaml      # gha-runner-scale-set helm overrides
 └── README.md
 ```
@@ -85,17 +87,20 @@ docker buildx build \
   --push .
 ```
 
-### 6. Apply Athens
+### 6. Apply the in-cluster mirrors
 
 ```bash
 kubectl apply -f athens/athens.yaml
+kubectl apply -f verdaccio/verdaccio.yaml
 kubectl -n athens rollout status deploy/athens
+kubectl -n verdaccio rollout status deploy/verdaccio
 ```
 
 ### 7. Install the runner scale set
 
-`values.yaml` carries the runner image, dind, proxy, `maxRunners`, and
-`GOPROXY` — the chart picks up the rest from the controller install.
+`values.yaml` carries the runner image, dind, proxy, `maxRunners`, `GOPROXY`,
+and `NPM_CONFIG_REGISTRY` — the chart picks up the rest from the controller
+install.
 
 ```bash
 helm install my-runners \
@@ -129,7 +134,13 @@ jobs:
         with:
           go-version: "1.26"   # matches a folder name in this repo
           cache: false         # GOPROXY routes through Athens instead
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: false         # NPM_CONFIG_REGISTRY routes through Verdaccio
       - run: cd backend && go test -race -cover ./...
+      - run: cd frontend && pnpm install --frozen-lockfile
 ```
 
 ## Tuning knobs
@@ -223,6 +234,17 @@ env:
 
 Fallback chain — if Athens is unreachable, jobs still resolve modules upstream.
 
+### NPM_CONFIG_REGISTRY
+
+```yaml
+env:
+  - name: NPM_CONFIG_REGISTRY
+    value: http://verdaccio.verdaccio.svc.cluster.local:4873/
+```
+
+Honoured by npm, pnpm, and yarn. Verdaccio proxies missing packages to
+`registry.npmjs.org` and caches them on its PVC.
+
 ## Bumping Go / Node
 
 1. Look up the latest patch in the actions/*-versions manifests linked above.
@@ -246,4 +268,5 @@ helm upgrade my-runners \
 helm uninstall my-runners -n arc-runners
 helm uninstall arc -n arc-systems
 kubectl delete -f athens/athens.yaml
+kubectl delete -f verdaccio/verdaccio.yaml
 ```
