@@ -27,6 +27,11 @@ template:
         env:
           ## Route actions/cache (and setup-go/setup-node implicit cache) to
           ## the in-cluster cache server instead of GitHub's. See cache-server/.
+          ## Both keys are set: newer runners (>=2.323) read ACTIONS_RESULTS_URL
+          ## for the v2 cache API; older / fallback paths still consult
+          ## ACTIONS_CACHE_URL.
           - name: ACTIONS_RESULTS_URL
+            value: http://actions-cache-server.actions-cache.svc.cluster.local:3000/
+          - name: ACTIONS_CACHE_URL
             value: http://actions-cache-server.actions-cache.svc.cluster.local:3000/
         # If the package is private, add an imagePullSecret here.
