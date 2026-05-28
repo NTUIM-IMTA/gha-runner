@@ -80,6 +80,10 @@ spec:
           ports:
             - containerPort: 4873
               name: http
+          env:
+            ## Override the k8s-injected VERDACCIO_PORT (tcp://<svc-ip>:4873).
+            - name: VERDACCIO_PORT
+              value: "4873"
           volumeMounts:
             - name: storage
               mountPath: /verdaccio/storage
