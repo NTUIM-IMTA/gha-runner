@@ -54,4 +54,7 @@ template:
           ## Fallback chain: in-cluster → upstream → direct.
           - name: GOPROXY
             value: http://athens.athens.svc.cluster.local:3000,https://proxy.golang.org,direct
+          ## Route npm / pnpm / yarn through the in-cluster Verdaccio mirror.
+          - name: NPM_CONFIG_REGISTRY
+            value: http://verdaccio.verdaccio.svc.cluster.local:4873/
         # If the package is private, add an imagePullSecret here.

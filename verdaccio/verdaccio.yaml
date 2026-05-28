@@ -1,0 +1,120 @@
+# In-cluster npm / pnpm registry mirror (https://verdaccio.org/)
+#
+# Apply: kubectl apply -f verdaccio.yaml
+# Runners use it via NPM_CONFIG_REGISTRY env (set in gha-runner values.yaml).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: verdaccio
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: verdaccio-storage
+  namespace: verdaccio
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verdaccio-config
+  namespace: verdaccio
+data:
+  config.yaml: |
+    storage: /verdaccio/storage
+    listen: 0.0.0.0:4873
+    web:
+      enable: false
+    auth:
+      htpasswd:
+        file: /verdaccio/storage/htpasswd
+        max_users: -1   # disable signup
+    uplinks:
+      npmjs:
+        url: https://registry.npmjs.org/
+        cache: true
+        timeout: 30s
+        maxage: 10m
+    packages:
+      '@*/*':
+        access: $all
+        publish: $authenticated
+        proxy: npmjs
+      '**':
+        access: $all
+        publish: $authenticated
+        proxy: npmjs
+    log:
+      type: stdout
+      format: pretty
+      level: warn
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verdaccio
+  namespace: verdaccio
+  labels:
+    app: verdaccio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: verdaccio
+  template:
+    metadata:
+      labels:
+        app: verdaccio
+    spec:
+      containers:
+        - name: verdaccio
+          image: verdaccio/verdaccio:6
+          ports:
+            - containerPort: 4873
+              name: http
+          volumeMounts:
+            - name: storage
+              mountPath: /verdaccio/storage
+            - name: config
+              mountPath: /verdaccio/conf
+          readinessProbe:
+            httpGet:
+              path: /-/ping
+              port: 4873
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: verdaccio-storage
+        - name: config
+          configMap:
+            name: verdaccio-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: verdaccio
+  namespace: verdaccio
+spec:
+  type: ClusterIP
+  selector:
+    app: verdaccio
+  ports:
+    - port: 4873
+      targetPort: 4873
+      name: http
