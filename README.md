@@ -1,64 +1,81 @@
 # gha-runner
 
-Custom self-hosted runner images for [Actions Runner Controller (ARC)](https://github.com/actions/actions-runner-controller)
-`gha-runner-scale-set`, used by NTUIM-IMTA.
-
-The stock `ghcr.io/actions/actions-runner` is a bare Ubuntu without `gcc`,
-`docker`, `yq`, or an `/opt/hostedtoolcache`. Workflows that worked on
-`ubuntu-latest` break in several ways when pointed at it:
-
-- `go test -race` fails (cgo needs a C toolchain)
-- `docker/setup-buildx-action` fails (no docker daemon, no CLI)
-- `setup-go` / `setup-node` redownload the SDK every job (measured 6 min for
-  `setup-go` alone)
-
-This repo addresses all three:
-
-| Piece | Fix |
-|---|---|
-| `build-essential`, `git`, `jq`, `unzip` | apt-installed in the runner image |
-| `docker` CLI + buildx-plugin | apt-installed; the daemon lives in a dind sidecar (`containerMode: dind`) |
-| `yq` (Mike Farah, Go) | dropped into `/usr/local/bin/yq` |
-| Pre-seeded toolcache for setup-go / setup-node | `/opt/hostedtoolcache/{go,node}/<ver>/x64/` + `RUNNER_TOOL_CACHE` env |
-
-`actions/cache` still goes to GitHub's hosted cache (~3 MB/s for big restores).
-A pod-level `ACTIONS_RESULTS_URL` / `ACTIONS_CACHE_URL` override does **not**
-work on runner ≥ 2.323 — `Runner.Worker` overwrites those vars from the job
-message before any action sees them, so an in-cluster cache server is bypassed.
-Speeding cache restore up needs a network-level redirect (sidecar / proxy)
-handled outside this repo.
+Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
+[Actions Runner Controller](https://github.com/actions/actions-runner-controller).
 
 ## Repository layout
 
 ```
 .
-├── go1.26-node24/                 # one folder per (Go major.minor, Node major) combo
+├── go1.26-node24/   # custom runner image (one folder per Go/Node combo)
 │   └── Dockerfile
-├── values.yaml                    # ARC AutoscalingRunnerSet override
+├── athens/          # in-cluster Go module proxy manifest
+│   └── athens.yaml
+├── values.yaml      # gha-runner-scale-set helm overrides
 └── README.md
 ```
 
-Add a new folder per Go/Node combination when the workflows pin a new version.
+## Set up from a blank OS
 
-## Current cluster state
+Target: Ubuntu 24.04 LTS (or Debian-equivalent), x86_64, single node.
 
-| Thing | Value |
-|---|---|
-| Cluster | k3s, single node `gh-runner`, default StorageClass `local-path` |
-| ARC release | `my-runners` in namespace `arc-runners`, chart `gha-runner-scale-set` v0.14.2 |
-| Runner group | `gh-runner` (in `githubConfigUrl: https://github.com/NTUIM-IMTA`) |
-| Workflow `runs-on:` label | `my-runners` |
+### 1. k3s
 
-## Build & push the runner image
+```bash
+curl -sfL https://get.k3s.io | sh -
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+sed -i "s/127.0.0.1/$(hostname -I | awk '{print $1}')/g" ~/.kube/config
+export KUBECONFIG=~/.kube/config
+kubectl get nodes
+```
 
-The cluster is x86_64. We build single-arch for `linux/amd64`.
+### 2. helm
+
+```bash
+curl https://baltocdn.com/helm/signing.asc | sudo gpg --dearmor -o /usr/share/keyrings/helm.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] \
+  https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update && sudo apt-get install -y helm
+helm version
+```
+
+### 3. ARC controller
+
+```bash
+helm install arc \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --version 0.14.2 \
+  -n arc-systems --create-namespace
+```
+
+### 4. GitHub config secret
+
+Create a Personal Access Token with `repo` + `admin:org` scopes (or a GitHub
+App with equivalent permissions), then:
+
+```bash
+kubectl create namespace arc-runners
+kubectl -n arc-runners create secret generic gh-config \
+  --from-literal=github_token='ghp_xxx'
+```
+
+### 5. Build & push the runner image
+
+Once-only login:
+
+```bash
+gh auth refresh -h github.com -s write:packages,read:packages
+gh auth token | docker login ghcr.io -u <gh-user> --password-stdin
+```
+
+Versions must match the latest patch in
+[actions/go-versions](https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json)
+and
+[actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json):
 
 ```bash
 cd go1.26-node24
-
-# Versions MUST be the exact patch setup-go / setup-node resolve to from
-# https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json
-# https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
 docker buildx build \
   --platform linux/amd64 \
   --build-arg GO_VERSION=1.26.3 \
@@ -68,18 +85,56 @@ docker buildx build \
   --push .
 ```
 
-On a fresh machine, log in to ghcr first with a token that has `write:packages`:
+### 6. Apply Athens
 
 ```bash
-gh auth refresh -h github.com -s write:packages,read:packages
-gh auth token | docker login ghcr.io -u <gh-user> --password-stdin
+kubectl apply -f athens/athens.yaml
+kubectl -n athens rollout status deploy/athens
 ```
 
-`imagePullPolicy: Always` on the runner pod means the next job picks up the new
-digest automatically — no helm change needed when only the image tag content
-changes.
+### 7. Install the runner scale set
 
-## Deploy / upgrade the runners
+`values.yaml` carries the runner image, dind, proxy, `maxRunners`, and
+`GOPROXY` — the chart picks up the rest from the controller install.
+
+```bash
+helm install my-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --version 0.14.2 \
+  -n arc-runners \
+  --set githubConfigUrl=https://github.com/NTUIM-IMTA \
+  --set githubConfigSecret=gh-config \
+  --set runnerGroup=gh-runner \
+  -f values.yaml
+```
+
+### 8. Verify
+
+```bash
+kubectl -n arc-systems get pods
+kubectl -n arc-runners get autoscalingrunnerset my-runners
+```
+
+In any consumer repo's workflow, set `runs-on: my-runners`.
+
+## Workflow conventions
+
+```yaml
+jobs:
+  test:
+    runs-on: my-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"   # matches a folder name in this repo
+          cache: false         # GOPROXY routes through Athens instead
+      - run: cd backend && go test -race -cover ./...
+```
+
+## Tuning knobs
+
+All knobs live in `values.yaml`. After editing:
 
 ```bash
 helm upgrade my-runners \
@@ -90,107 +145,105 @@ helm upgrade my-runners \
   -f values.yaml
 ```
 
-`--reuse-values` preserves the chart-time settings that aren't in `values.yaml`
-(`githubConfigUrl`, `githubConfigSecret`, `runnerGroup`). What `values.yaml`
-adds on top:
+### Concurrency cap (`maxRunners`)
 
-- `maxRunners: 8` — cap concurrent runner pods (each one also spawns a dind
-  sidecar, so total container budget is ~2x this)
-- `containerMode.type: dind` — chart auto-injects the `dind` sidecar,
-  `/var/run` shared volume, `DOCKER_HOST` env, etc.
-- `proxy:` — runner / dind / initContainer egress goes through the campus
-  Squid forward proxy at `140.112.106.22:3128`
-- `template.spec.containers[0].image` — our custom image
+```yaml
+maxRunners: 8
+```
 
-In-flight runner pods finish their current job and exit; ARC spawns new ones
-from the new spec.
-
-## Tuning knobs
-
-All knobs live in `values.yaml`; after every edit run the `helm upgrade`
-command above.
-
-### Concurrency (`maxRunners`)
-
-Each in-flight job costs two containers on the node (runner + dind sidecar)
-plus the toolcache image overhead. Rough budget on the current single-node
-k3s (`gh-runner`):
-
-| `maxRunners` | Peak pods | When to use |
+| Value | Peak pods | Notes |
 |---|---|---|
-| 2 | ~4 | Diagnosing OOM / heavy app build jobs |
-| 4 | ~8 | Default for everyday CI |
-| 8 | ~16 | Multiple repos pushing in parallel — current setting |
-| 16+ | risky | Only if node was scaled up |
+| 2 | ~4 | Diagnosing OOM |
+| 4 | ~8 | Conservative default |
+| 8 | ~16 | Current setting |
+| 16+ | risky | Only after scaling the node |
 
-Watch `kubectl top node gh-runner` while several runs are queued; bump down
-if memory pressure shows.
+Watch `kubectl top node` while runs queue; bump down on memory pressure.
 
-### Egress proxy
+### Egress proxy (`proxy:`)
 
-The whole `proxy:` block in `values.yaml`. To bypass Squid temporarily, comment
-the block out and `helm upgrade`. To add a host that should never go through
-Squid, append it to `proxy.noProxy`. Examples already in place:
+```yaml
+proxy:
+  http:
+    url: http://140.112.106.22:3128
+  https:
+    url: http://140.112.106.22:3128
+  noProxy:
+    - localhost
+    - 127.0.0.1
+    - .svc
+    - .cluster.local
+    - 10.0.0.0/8
+    - 140.112.0.0/16
+    - ghcr.io
+    - github.com
+    - api.github.com
+```
 
-- `10.0.0.0/8`, `.svc`, `.cluster.local`, `localhost` — cluster-internal
-- `140.112.0.0/16` — campus subnet
-- `ghcr.io`, `github.com`, `api.github.com` — direct upstream so image pulls
-  and the runner registration API skip Squid
+Append to `noProxy` to bypass Squid for a specific host. Comment the whole
+`proxy:` block out to fall back to direct egress.
 
-The chart injects `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` (both upper- and
-lowercase forms) into runner + dind + initContainer + listener. Confirm
-inside a running pod with:
+Verify inside a runner pod:
 
 ```bash
 kubectl -n arc-runners exec <runner-pod> -c runner -- env | grep -i proxy
 ```
 
-## Use it from a workflow
+### dind sidecar (`containerMode`)
 
 ```yaml
-jobs:
-  test:
-    runs-on: my-runners        # selector → AutoscalingRunnerSet name
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"   # must match a `<ver>` folder in this repo
-          cache: false         # use in-cluster Athens instead — see below
-      - run: cd backend && go test -race -cover ./...
+containerMode:
+  type: dind
 ```
 
-Nothing repo-specific — every workflow under `NTUIM-IMTA` just sets
-`runs-on: my-runners`.
+Disables: `docker/setup-buildx-action` and any `docker build` in the workflow
+will fail with "cannot connect to docker daemon".
 
-### Why `cache: false`
+### Runner image
 
-The runner pod has `GOPROXY` pointing at the in-cluster Athens proxy
-(`http://athens.athens.svc.cluster.local:3000`). `go mod download` therefore
-fetches modules from inside the cluster (Gbps) on every job — usually a few
-seconds for our codebases.
-
-The default `cache: true` would instead make `setup-go` use `actions/cache`,
-which restores a GOMODCACHE tarball from GitHub's hosted cache server. That
-crosses the public internet and was measured at ~25-30s per job for a 150 MB
-tarball. Skipping it and going straight to Athens is faster and removes one
-moving part.
-
-`GOPROXY` is set with a fallback chain:
-
-```
-http://athens.../, https://proxy.golang.org, direct
+```yaml
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/ntuim-imta/gha-runner:go1.26-node24
+        imagePullPolicy: Always
 ```
 
-so if Athens is down or hasn't seen a module before, the job still finishes
-by hitting upstream directly.
+`Always` re-pulls on every job, so a `--push` with the same tag goes live on
+the next run with no helm change.
+
+### GOPROXY
+
+```yaml
+env:
+  - name: GOPROXY
+    value: http://athens.athens.svc.cluster.local:3000,https://proxy.golang.org,direct
+```
+
+Fallback chain — if Athens is unreachable, jobs still resolve modules upstream.
 
 ## Bumping Go / Node
 
-1. Look up the new resolved patch at the actions/*-versions manifests linked
-   above.
-2. Create a new folder `goX.Y-nodeZ/`, copy and tweak the `Dockerfile` ARGs.
-3. Build & push with tags `goX.Y-nodeZ` (floating) + `goX.Y.Z-nodeA.B.C`
-   (immutable, for rollback).
-4. Update `image:` in `values.yaml` and re-run the `helm upgrade`.
+1. Look up the latest patch in the actions/*-versions manifests linked above.
+2. Create a new folder `goX.Y-nodeZ/` and copy/edit the `Dockerfile` ARGs.
+3. Build & push with both the floating tag (`goX.Y-nodeZ`) and the immutable
+   tag (`goX.Y.Z-nodeA.B.C`).
+4. Update `template.spec.containers[0].image` in `values.yaml`, run the
+   `helm upgrade` from the tuning section.
 5. Keep the old folder until no workflow pins it.
+
+## Update / uninstall
+
+```bash
+# Upgrade chart version
+helm upgrade my-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --version <new-version> \
+  -n arc-runners --reuse-values -f values.yaml
+
+# Tear down
+helm uninstall my-runners -n arc-runners
+helm uninstall arc -n arc-systems
+kubectl delete -f athens/athens.yaml
+```
