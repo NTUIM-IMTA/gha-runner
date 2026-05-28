@@ -7,6 +7,12 @@
 #   runnerGroup:        gh-runner
 # Use `--reuse-values -f values.yaml` so those stay intact.
 
+## containerMode dind injects a docker:dind sidecar + shared /var/run,
+## so `docker/setup-buildx-action` and any plain `docker build` work
+## from inside the runner.
+containerMode:
+  type: dind
+
 template:
   spec:
     containers:
