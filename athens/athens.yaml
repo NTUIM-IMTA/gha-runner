@@ -46,6 +46,10 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            ## Override the auto-injected ATHENS_PORT (which becomes
+            ## tcp://<svc-ip>:3000 because the Service is named "athens").
+            - name: ATHENS_PORT
+              value: ":3000"
             - name: ATHENS_STORAGE_TYPE
               value: disk
             - name: ATHENS_DISK_STORAGE_ROOT
