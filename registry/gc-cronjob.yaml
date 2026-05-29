@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-gc-script
+  namespace: registry
+data:
+  retention.sh: |
+    #!/bin/sh
+    set -eu
+    REG=registry.registry.svc.cluster.local:5000
+    KEEP=5
+    regctl registry set --tls disabled "$REG"
+    for repo in $(regctl repo ls "$REG"); do
+      tags=$(regctl tag ls "$REG/$repo" | grep '^sha-' || true)
+      [ -z "$tags" ] && continue
+      for tag in $tags; do
+        created=$(regctl image config "$REG/$repo:$tag" --format '{{.Created}}' 2>/dev/null || echo "")
+        printf '%s\t%s\n' "$created" "$tag"
+      done | sort -r | awk -v k="$KEEP" 'NR>k {print $2}' | while read -r old; do
+        echo "deleting $repo:$old"
+        regctl tag rm "$REG/$repo:$old" || true
+      done
+    done
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registry-gc
+  namespace: registry
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: retention
+              image: ghcr.io/regclient/regctl:v0.8.0-alpine
+              command: ["/bin/sh", "/scripts/retention.sh"]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+          containers:
+            - name: gc
+              image: registry:2
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  mkdir -p /var/lib/registry/docker/registry/v2/repositories
+                  mkdir -p /var/lib/registry/docker/registry/v2/blobs
+                  /bin/registry garbage-collect -m --delete-untagged=true /etc/docker/registry/config.yml
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/registry
+          volumes:
+            - name: script
+              configMap:
+                name: registry-gc-script
+            - name: data
+              persistentVolumeClaim:
+                claimName: registry-data
