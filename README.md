@@ -13,6 +13,9 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 │   └── athens.yaml
 ├── verdaccio/       # in-cluster npm / pnpm registry mirror manifest
 │   └── verdaccio.yaml
+├── registry/        # in-cluster image registry + daily GC cronjob
+│   ├── registry.yaml
+│   └── gc-cronjob.yaml
 ├── values.yaml      # gha-runner-scale-set helm overrides
 ├── README.md
 └── BUILD.md         # appendix: build/push the runner image (one-time)
@@ -60,7 +63,7 @@ scopes (ARC's documented auth; a GitHub App with equivalent permissions also
 works). Then:
 
 ```bash
-GH_TOKEN=ghp_xxx   # classic PAT, never commit the real value
+GH_TOKEN=github_pat_xxx   # PAT, never commit the real value
 kubectl create namespace arc-runners
 kubectl -n arc-runners delete secret gh-config
 kubectl -n arc-runners create secret generic gh-config \
@@ -201,6 +204,58 @@ env:
 Honoured by npm, pnpm, and yarn. Verdaccio proxies missing packages to
 `registry.npmjs.org` and caches them on its PVC.
 
+## 本地 image registry
+
+叢集內建一個 image registry，讓各服務的 image 留在本地、不必經外網推送／拉取到 GHCR。
+以 **insecure HTTP** 對外服務於 `registry.imta.im.ntu.edu.tw:5000`，對外存取由
+**Proxmox（PVE）層的防火牆**控管（node 與 k3s 本身不另設防火牆）。
+
+manifest：
+
+- `registry/registry.yaml` — Namespace、PVC（20Gi，`local-path`）、`registry:2`
+  Deployment（已開啟 `REGISTRY_STORAGE_DELETE_ENABLED`）、`LoadBalancer:5000`
+  （k3s ServiceLB 綁 node IP）。
+- `registry/gc-cronjob.yaml` — 每日 04:00 的 GC CronJob：每個 repo 保留最新 5 個
+  `sha-*` tag，刪除其餘後回收 blob 空間。
+
+### node 一次性設定
+
+1. 將 DNS `registry.imta.im.ntu.edu.tw` 指向 node 的 IP。
+2. 讓 containerd 以 HTTP 拉取此 registry —— 編輯 `/etc/rancher/k3s/registries.yaml`：
+
+   ```yaml
+   mirrors:
+     "registry.imta.im.ntu.edu.tw:5000":
+       endpoint:
+         - "http://registry.imta.im.ntu.edu.tw:5000"
+   ```
+
+   containerd 預設對 registry 走 HTTPS；若不指定，部署拉取會出現
+   `http: server gave HTTP response to HTTPS client`。
+3. `sudo systemctl restart k3s` 套用。
+4. 對外的 5000 埠請在 PVE 防火牆限制到信任來源 —— 此 registry 無 TLS、無認證，
+   防火牆是唯一防線。
+
+### 部署
+
+```bash
+kubectl apply -f registry/registry.yaml
+kubectl apply -f registry/gc-cronjob.yaml
+```
+
+驗證：`curl http://registry.imta.im.ntu.edu.tw:5000/v2/` 應回 `200`。
+
+### 與各服務 build 的整合
+
+各 app 的 `build-image.yml` 會依觸發方式選擇 image 推送目的地，並同步改寫 ArgoCD
+helm chart 的 image 來源：
+
+- 由 push 觸發（CI 後 `workflow_run`）→ 一律推到**本地 registry**。
+- 手動 `workflow_dispatch` → 可選 `local` 或 `gha`（ghcr.io），**預設 `local`**。
+
+GHCR 的舊版本清理仍由各 repo 既有的 `Delete-Old-Packages.yaml` 負責；本地
+registry 的清理則由上述 GC CronJob 處理。
+
 ## Update / uninstall
 
 ```bash
@@ -215,4 +270,6 @@ helm uninstall my-runners -n arc-runners
 helm uninstall arc -n arc-systems
 kubectl delete -f athens/athens.yaml
 kubectl delete -f verdaccio/verdaccio.yaml
+kubectl delete -f registry/gc-cronjob.yaml
+kubectl delete -f registry/registry.yaml
 ```
