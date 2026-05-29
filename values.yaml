@@ -4,35 +4,13 @@
 # Existing release `my-runners` in namespace `arc-runners` already supplies:
 #   githubConfigUrl:    https://github.com/NTUIM-IMTA
 #   githubConfigSecret: gh-config
-#   runnerGroup:        gh-runner
+# runnerGroup is left unset, so runners register into the org's Default group.
 # Use `--reuse-values -f values.yaml` so those stay intact.
 
 ## Single-node k3s has limited headroom: each runner pod also brings a
 ## privileged dind sidecar, so concurrent jobs scale at ~2x the pod count.
 ## Watch node CPU / memory under load before bumping further.
-maxRunners: 8
-
-## Outbound HTTP traffic from runner / dind / initContainer goes through the
-## campus Squid forward proxy. The chart wires HTTP_PROXY / HTTPS_PROXY /
-## NO_PROXY into every container in the runner pod.
-proxy:
-  http:
-    url: http://140.112.106.22:3128
-  https:
-    url: http://140.112.106.22:3128
-  noProxy:
-    # cluster-internal — never proxy
-    - localhost
-    - 127.0.0.1
-    - .svc
-    - .cluster.local
-    - 10.0.0.0/8
-    # campus internal
-    - 140.112.0.0/16
-    # GitHub direct — skip Squid for image pulls and runner API
-    - ghcr.io
-    - github.com
-    - api.github.com
+maxRunners: 4
 
 ## containerMode dind injects a docker:dind sidecar + shared /var/run,
 ## so `docker/setup-buildx-action` and any plain `docker build` work
