@@ -223,12 +223,12 @@ manifest：
 1. 將 DNS `registry.imta.im.ntu.edu.tw` 指向 node 的 IP。
 2. 讓 containerd 以 HTTP 拉取此 registry —— 編輯 `/etc/rancher/k3s/registries.yaml`：
 
-   ```yaml
-   mirrors:
-     "registry.imta.im.ntu.edu.tw:5000":
-       endpoint:
-         - "http://registry.imta.im.ntu.edu.tw:5000"
-   ```
+```yaml
+mirrors:
+  "registry.imta.im.ntu.edu.tw:5000":
+    endpoint:
+      - "http://registry.imta.im.ntu.edu.tw:5000"
+```
 
    containerd 預設對 registry 走 HTTPS；若不指定，部署拉取會出現
    `http: server gave HTTP response to HTTPS client`。
