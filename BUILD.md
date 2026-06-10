@@ -55,17 +55,21 @@ plugin is **not** in the stock image, so `verdaccio/Dockerfile` bakes it into a
 custom image. Rebuild this only when bumping the Verdaccio or plugin version.
 
 The plugin requires Verdaccio >= 7, which at the time of writing only ships as a
-beta — the Dockerfile pins `verdaccio/verdaccio:7.0.0-beta.4`.
+beta — published on Docker Hub under the rolling `7.x-next` tag (no per-beta
+tag), so the Dockerfile pins it by digest.
 
 ```bash
 # Log in to GHCR first (see step 1 above).
 docker buildx build verdaccio \
   --platform linux/amd64 \
-  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-beta.4 \
+  --provenance=false \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
   --push
 ```
 
 The manifest (`verdaccio/verdaccio.yaml`) pins this tag with
 `imagePullPolicy: Always`, so re-pushing the same tag goes live on the next pod
-restart. To bump: edit the `FROM`/plugin version in `verdaccio/Dockerfile`,
-rebuild with the new tag, and update the `image:` in `verdaccio/verdaccio.yaml`.
+restart. To bump: update the pinned `7.x-next@sha256:…` base digest (and/or
+plugin version) in `verdaccio/Dockerfile`, then rebuild with the command above.
+Look up the current digest with
+`docker buildx imagetools inspect verdaccio/verdaccio:7.x-next`.

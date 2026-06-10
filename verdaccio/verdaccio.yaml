@@ -13,7 +13,7 @@
 #
 # The AWS S3 storage plugin is NOT in the stock image — it is baked into a custom
 # image (see verdaccio/Dockerfile + BUILD.md). It requires Verdaccio >= 7, which
-# currently only ships as a beta (7.0.0-beta.4). Apply seaweedfs/seaweedfs.yaml
+# currently only ships as a beta (Docker tag 7.x-next). Apply seaweedfs/seaweedfs.yaml
 # first; it pre-creates the "verdaccio" bucket (the plugin does not create it).
 ---
 apiVersion: v1
@@ -113,9 +113,9 @@ spec:
     spec:
       containers:
         - name: verdaccio
-          # Custom image: stock verdaccio:7.0.0-beta.4 + verdaccio-aws-s3-storage
+          # Custom image: stock verdaccio:7.x-next (v7 beta) + verdaccio-aws-s3-storage
           # baked in. Build/push per BUILD.md.
-          image: ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-beta.4
+          image: ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
           imagePullPolicy: Always
           ports:
             - containerPort: 4873
