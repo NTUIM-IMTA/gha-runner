@@ -2,23 +2,38 @@
 #
 # Apply: kubectl apply -f athens.yaml
 # Runners use it via GOPROXY env (set in gha-runner values.yaml).
+#
+# Storage backend is the in-cluster SeaweedFS S3 object store (seaweedfs/), NOT
+# local disk. The disk backend wrote module files to their final path with no
+# atomic rename, so a crash mid-download left a 0-byte/truncated go.mod or
+# source.zip cached forever (Athens does no integrity check on read) → fatal
+# `checksum mismatch`. S3 objects only appear once fully written (PutObject /
+# multipart CompleteUpload), so a crash leaves the key absent and Athens
+# re-fetches from upstream on the next request.
+#
+# Athens' storage type is still called "minio" — that is its generic
+# S3-compatible client (minio-go), here pointed at SeaweedFS's S3 gateway, not at
+# a MinIO server. Apply seaweedfs/seaweedfs.yaml first; Athens crash-loops until
+# the S3 endpoint is reachable. Athens auto-creates its "gomods" bucket on start.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: athens
 ---
+# S3 credentials for the SeaweedFS backend. They MUST match an identity in
+# seaweedfs/seaweedfs.yaml (the seaweedfs-s3-config Secret). Secrets are
+# namespaced, so the same values live in both manifests. envFrom injects these
+# as ATHENS_MINIO_* env vars directly.
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Secret
 metadata:
-  name: athens-storage
+  name: seaweedfs-credentials
   namespace: athens
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 30Gi
+type: Opaque
+stringData:
+  ATHENS_MINIO_ACCESS_KEY_ID: gomods
+  ATHENS_MINIO_SECRET_ACCESS_KEY: gomods-athens-s3-storage
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -45,24 +60,31 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          envFrom:
+            ## ATHENS_MINIO_ACCESS_KEY_ID / ATHENS_MINIO_SECRET_ACCESS_KEY
+            - secretRef:
+                name: seaweedfs-credentials
           env:
             ## Override the auto-injected ATHENS_PORT (which becomes
             ## tcp://<svc-ip>:3000 because the Service is named "athens").
             - name: ATHENS_PORT
               value: ":3000"
+            ## S3-compatible object storage (SeaweedFS) — atomic writes, no
+            ## poison cache. "minio" is Athens' generic S3 client type. See header.
             - name: ATHENS_STORAGE_TYPE
-              value: disk
-            - name: ATHENS_DISK_STORAGE_ROOT
-              value: /var/lib/athens
+              value: minio
+            - name: ATHENS_MINIO_ENDPOINT
+              value: seaweedfs.seaweedfs.svc.cluster.local:8333
+            - name: ATHENS_MINIO_USE_SSL
+              value: "false"
+            - name: ATHENS_MINIO_BUCKET_NAME
+              value: gomods
             ## sync mode = block module request until upstream fetch is done;
             ## async streams partial data. sync is simpler to reason about.
             - name: ATHENS_DOWNLOAD_MODE
               value: sync
             - name: ATHENS_GO_BINARY_ENV_VARS
               value: "GOPROXY=https://proxy.golang.org,direct"
-          volumeMounts:
-            - name: storage
-              mountPath: /var/lib/athens
           readinessProbe:
             httpGet:
               path: /healthz
@@ -75,10 +97,6 @@ spec:
               memory: 256Mi
             limits:
               memory: 2Gi
-      volumes:
-        - name: storage
-          persistentVolumeClaim:
-            claimName: athens-storage
 ---
 apiVersion: v1
 kind: Service
