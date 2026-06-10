@@ -1,0 +1,160 @@
+# In-cluster S3-compatible object store (https://github.com/seaweedfs/seaweedfs)
+# — backs both Athens (Go modules) and Verdaccio (npm packages).
+#
+# Apply: kubectl apply -f seaweedfs/seaweedfs.yaml
+#
+# Why object storage: Athens' `disk` backend and Verdaccio's local-fs both write
+# some files straight to their final path with no atomic rename, so a pod crash
+# mid-download leaves a 0-byte / truncated go.mod / source.zip / package.json
+# cached forever (neither proxy integrity-checks on read) → fatal `checksum
+# mismatch` (Go) or HTTP 500 on `JSON.parse("")` (npm). An S3 object only becomes
+# readable once its write fully completes (PutObject / multipart CompleteUpload),
+# so a crash leaves the key absent and the proxy re-fetches from upstream on the
+# next request — the poison-cache class of bug is eliminated by construction.
+#
+# Why SeaweedFS (not MinIO): the MinIO community edition was archived in 2026
+# (read-only, no more releases). SeaweedFS is an actively maintained, Apache-2.0,
+# S3-compatible store. Its S3 gateway supports CreateBucket, multipart upload and
+# CopyObject — the operations Athens (minio-go incl. source.zip ComposeObject)
+# and Verdaccio (verdaccio-aws-s3-storage, AWS SDK v3) need.
+#
+# Exposure: ClusterIP only. Trust boundary is the PVE firewall, same as the
+# in-cluster image registry.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: seaweedfs
+---
+# S3 identities (the "server side" credentials). The accessKey/secretKey here MUST
+# match the creds Athens (athens ns) and Verdaccio (verdaccio ns) use. To rotate:
+# edit this Secret + both consumer Secrets, re-apply, restart all three.
+# "Admin" action grants bucket create + object read/write/list.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seaweedfs-s3-config
+  namespace: seaweedfs
+type: Opaque
+stringData:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "gomods",
+          "credentials": [
+            { "accessKey": "gomods", "secretKey": "gomods-athens-s3-storage" }
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seaweedfs-data
+  namespace: seaweedfs
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: seaweedfs
+  labels:
+    app: seaweedfs
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC: avoid two pods racing on rollout
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:4.32
+          # All-in-one: master + volume + filer + S3 gateway in one process.
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.config=/etc/seaweedfs/s3.json
+          ports:
+            - containerPort: 8333
+              name: s3
+            - containerPort: 9333
+              name: master
+          lifecycle:
+            postStart:
+              exec:
+                # Pre-create both buckets via the local weed shell (localhost
+                # master). Idempotent; Athens also self-creates "gomods" as a
+                # backstop, but Verdaccio's S3 plugin does NOT create its bucket.
+                command:
+                  - sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do
+                      echo 's3.bucket.list' | weed shell >/dev/null 2>&1 && break
+                      sleep 2
+                    done
+                    echo 's3.bucket.create -name gomods'    | weed shell || true
+                    echo 's3.bucket.create -name verdaccio' | weed shell || true
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8333
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /cluster/status
+              port: 9333
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: seaweedfs-data
+        - name: s3-config
+          secret:
+            secretName: seaweedfs-s3-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: seaweedfs
+spec:
+  type: ClusterIP
+  selector:
+    app: seaweedfs
+  ports:
+    - port: 8333
+      targetPort: 8333
+      name: s3
+    - port: 9333
+      targetPort: 9333
+      name: master
