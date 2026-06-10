@@ -46,3 +46,26 @@ with no helm change.
 4. Update `template.spec.containers[0].image` in `values.yaml`, then run the
    `helm upgrade` from the README's tuning section.
 5. Keep the old folder until no workflow pins it.
+
+# Appendix: Building the Verdaccio S3 image
+
+Verdaccio's storage backend is the in-cluster SeaweedFS S3 store (see
+[README](README.md#object-storage-seaweedfs)). The `verdaccio-aws-s3-storage`
+plugin is **not** in the stock image, so `verdaccio/Dockerfile` bakes it into a
+custom image. Rebuild this only when bumping the Verdaccio or plugin version.
+
+The plugin requires Verdaccio >= 7, which at the time of writing only ships as a
+beta — the Dockerfile pins `verdaccio/verdaccio:7.0.0-beta.4`.
+
+```bash
+# Log in to GHCR first (see step 1 above).
+docker buildx build verdaccio \
+  --platform linux/amd64 \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-beta.4 \
+  --push
+```
+
+The manifest (`verdaccio/verdaccio.yaml`) pins this tag with
+`imagePullPolicy: Always`, so re-pushing the same tag goes live on the next pod
+restart. To bump: edit the `FROM`/plugin version in `verdaccio/Dockerfile`,
+rebuild with the new tag, and update the `image:` in `verdaccio/verdaccio.yaml`.

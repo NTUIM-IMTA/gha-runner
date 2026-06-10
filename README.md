@@ -11,15 +11,21 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 │   └── Dockerfile
 ├── athens/          # in-cluster Go module proxy manifest
 │   └── athens.yaml
-├── verdaccio/       # in-cluster npm / pnpm registry mirror manifest
-│   └── verdaccio.yaml
+├── seaweedfs/       # S3 object store backing Athens + Verdaccio (atomic writes)
+│   └── seaweedfs.yaml
+├── verdaccio/       # in-cluster npm / pnpm registry mirror
+│   ├── verdaccio.yaml
+│   └── Dockerfile   # custom image: verdaccio + aws-s3-storage plugin
 ├── registry/        # in-cluster image registry + daily GC cronjob
 │   ├── registry.yaml
 │   └── gc-cronjob.yaml
 ├── values.yaml      # gha-runner-scale-set helm overrides
 ├── README.md
-└── BUILD.md         # appendix: build/push the runner image (one-time)
+└── BUILD.md         # appendix: build/push the runner + verdaccio-s3 images
 ```
+
+> **Note (2026):** the MinIO community edition was archived upstream. The
+> object store backing Athens and Verdaccio is [SeaweedFS](#object-storage-seaweedfs).
 
 ## Set up from a blank OS
 
@@ -73,15 +79,24 @@ kubectl -n arc-runners create secret generic gh-config \
 ### 5. Apply the in-cluster mirrors and registry
 
 ```bash
+# SeaweedFS first — Athens and Verdaccio crash-loop until the S3 endpoint is up.
+kubectl apply -f seaweedfs/seaweedfs.yaml
+kubectl -n seaweedfs rollout status deploy/seaweedfs
 kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
 kubectl apply -f registry/registry.yaml
 kubectl apply -f registry/gc-cronjob.yaml
-kubectl get ns athens verdaccio registry
+kubectl get ns seaweedfs athens verdaccio registry
 kubectl -n athens rollout status deploy/athens
 kubectl -n verdaccio rollout status deploy/verdaccio
 kubectl -n registry rollout status deploy/registry
 ```
+
+SeaweedFS pre-creates the `gomods` and `verdaccio` buckets on startup (Athens
+also self-creates `gomods` as a backstop). See
+[Object storage: SeaweedFS](#object-storage-seaweedfs) for why both proxies use
+object storage rather than local disk, and the note that **Verdaccio needs the
+custom S3 image built first** ([BUILD.md](BUILD.md)).
 
 The registry deploy above is enough for the cluster itself; for **consumers** to
 push/pull over `:5000` it also needs a one-time node-level config (DNS + a
@@ -212,6 +227,63 @@ env:
 Honoured by npm, pnpm, and yarn. Verdaccio proxies missing packages to
 `registry.npmjs.org` and caches them on its PVC.
 
+## Object storage: SeaweedFS
+
+Both proxies keep their cache in the in-cluster SeaweedFS S3 store
+(`seaweedfs/seaweedfs.yaml`) — Athens in the `gomods` bucket, Verdaccio in the
+`verdaccio` bucket — not on local disk.
+
+**Why.** Athens' `disk` backend and Verdaccio's local-fs both write some files
+straight to their final path with no atomic rename, and neither integrity-checks
+on read. So if the pod is killed mid-download (e.g. several builds hammer it at
+once and OOM it), it leaves a **0-byte or truncated** file at the real path and
+serves that poison cache forever:
+
+- **Athens** → Go fails with a fatal `checksum mismatch`, which — unlike a
+  network error — does **not** fall back to the next `GOPROXY`. Every build of
+  that module breaks until the bad file is deleted by hand.
+- **Verdaccio** → a 0-byte `package.json` makes `JSON.parse("")` throw, Verdaccio
+  returns HTTP 500, and pnpm (which checks publish age before fetching) can't get
+  the metadata so it fails closed with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`.
+
+**The fix is structural, not a cleanup job.** An S3 object only becomes readable
+once its write fully completes (`PutObject`, or multipart `CompleteUpload` /
+server-side compose), so a crash leaves the key **absent**, never half-written —
+and the proxy simply re-fetches from upstream on the next request. The
+poison-cache class of bug is eliminated by construction; no 0-byte/truncation
+sweeper is needed.
+
+**Why SeaweedFS and not MinIO.** The MinIO community edition was archived
+upstream in 2026 (read-only, no more releases). SeaweedFS is an actively
+maintained, Apache-2.0, S3-compatible store. Athens talks to it with its generic
+S3 client (its storage type is confusingly named `minio`, but the endpoint is
+SeaweedFS); Verdaccio talks to it via the `verdaccio-aws-s3-storage` plugin
+(AWS SDK v3) baked into a custom image (`verdaccio/Dockerfile`).
+
+The S3 access key/secret is one logical credential duplicated across three
+namespaces (the `seaweedfs-s3-config` Secret defines the server-side identity;
+`athens` and `verdaccio` each hold a matching Secret) and must be kept in sync.
+SeaweedFS is `ClusterIP`-only; the trust boundary is the PVE firewall, same as
+the image registry.
+
+> **Caveats / migration.**
+> - **Verdaccio needs Verdaccio >= 7**, which currently only ships as a beta —
+>   the custom image pins `7.0.0-beta.4`. Build/push it before applying
+>   ([BUILD.md](BUILD.md)); a critical mirror runs on a beta here.
+> - **Verify Athens' `source.zip` path** after cutover: it uses minio-go's
+>   `ComposeObject` (server-side multipart copy), the classic S3-compat edge
+>   case. Smoke-test with a large module (e.g. force a fresh `pdfcpu` fetch) and
+>   confirm the build passes.
+> - Switching starts with empty buckets; the first builds repopulate from
+>   upstream. The old `athens-storage` PVC and any live-deployed
+>   `athens-cache-janitor` CronJob (a disk-era stopgap that only swept 0-byte
+>   files) are obsolete:
+>
+>   ```bash
+>   kubectl -n athens delete cronjob athens-cache-janitor --ignore-not-found
+>   kubectl -n athens delete pvc athens-storage --ignore-not-found
+>   ```
+
 ## 本地 image registry
 
 叢集內建一個 image registry，讓各服務的 image 留在本地、不必經外網推送／拉取到 GHCR。
@@ -278,6 +350,7 @@ helm uninstall my-runners -n arc-runners
 helm uninstall arc -n arc-systems
 kubectl delete -f athens/athens.yaml
 kubectl delete -f verdaccio/verdaccio.yaml
+kubectl delete -f seaweedfs/seaweedfs.yaml
 kubectl delete -f registry/gc-cronjob.yaml
 kubectl delete -f registry/registry.yaml
 ```
