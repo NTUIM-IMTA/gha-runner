@@ -22,6 +22,8 @@ RUN mkdir -p /verdaccio/plugins \
 #    plugin must sit there directly. Its dependencies (@aws-sdk/*, …) ride along
 #    as a sibling node_modules so the plugin's require() calls resolve.
 FROM verdaccio/verdaccio:7.0.0-beta.4
+# Links the GHCR package to this repo (same convention as the runner image).
+LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 COPY --chown=10001:root --from=builder \
   /verdaccio/plugins/node_modules /verdaccio/plugins/node_modules
 COPY --chown=10001:root --from=builder \
