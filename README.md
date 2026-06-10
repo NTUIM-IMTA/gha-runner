@@ -92,6 +92,17 @@ kubectl -n verdaccio rollout status deploy/verdaccio
 kubectl -n registry rollout status deploy/registry
 ```
 
+The custom `verdaccio-s3` image on GHCR is private, so the verdaccio namespace
+needs a one-time pull secret (a token with `read:packages`; skip this if the
+package is made public like the runner image):
+
+```bash
+kubectl create namespace verdaccio --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n verdaccio create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io --docker-username=<gh-user> \
+  --docker-password=$(gh auth token)
+```
+
 SeaweedFS pre-creates the `gomods` and `verdaccio` buckets on startup (Athens
 also self-creates `gomods` as a backstop). See
 [Object storage: SeaweedFS](#object-storage-seaweedfs) for why both proxies use

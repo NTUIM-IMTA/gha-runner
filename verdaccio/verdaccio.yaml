@@ -111,6 +111,10 @@ spec:
       labels:
         app: verdaccio
     spec:
+      # The verdaccio-s3 GHCR package is private; this secret is created once by
+      # hand (see README step 5). Harmless if the package is later made public.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: verdaccio
           # Custom image: stock verdaccio:7.x-next (v7 beta) + verdaccio-aws-s3-storage
