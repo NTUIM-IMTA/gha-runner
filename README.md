@@ -31,6 +31,13 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 
 Target: Ubuntu 24.04 LTS (or Debian-equivalent), x86_64, single node.
 
+All `kubectl apply -f …` commands below run from a clone of this repo:
+
+```bash
+git clone https://github.com/NTUIM-IMTA/gha-runner.git ~/gha-runner
+cd ~/gha-runner
+```
+
 ### 1. k3s
 
 ```bash
@@ -70,44 +77,54 @@ works). Then:
 
 ```bash
 GH_TOKEN=github_pat_xxx   # PAT, never commit the real value
-kubectl create namespace arc-runners
-kubectl -n arc-runners delete secret gh-config
+kubectl create namespace arc-runners --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n arc-runners create secret generic gh-config \
-  --from-literal=github_token=$GH_TOKEN
+  --from-literal=github_token=$GH_TOKEN \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ### 5. Apply the in-cluster mirrors and registry
 
+The custom `verdaccio-s3` image on GHCR is private, so the verdaccio namespace
+needs a pull secret **before** its deployment can start (a PAT with
+`read:packages`; skip this block if the package is made public like the runner
+image):
+
 ```bash
-# SeaweedFS first — Athens and Verdaccio crash-loop until the S3 endpoint is up.
+GH_USER=eric2969          # GitHub account that can read the package
+GHCR_TOKEN=ghp_xxx        # PAT with read:packages, never commit the real value
+kubectl create namespace verdaccio --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n verdaccio create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io --docker-username=$GH_USER \
+  --docker-password=$GHCR_TOKEN \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Then the mirrors and the registry — SeaweedFS first, since Athens and Verdaccio
+crash-loop until the S3 endpoint is up:
+
+```bash
 kubectl apply -f seaweedfs/seaweedfs.yaml
 kubectl -n seaweedfs rollout status deploy/seaweedfs
 kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
 kubectl apply -f registry/registry.yaml
 kubectl apply -f registry/gc-cronjob.yaml
-kubectl get ns seaweedfs athens verdaccio registry
 kubectl -n athens rollout status deploy/athens
 kubectl -n verdaccio rollout status deploy/verdaccio
 kubectl -n registry rollout status deploy/registry
 ```
 
-The custom `verdaccio-s3` image on GHCR is private, so the verdaccio namespace
-needs a one-time pull secret (a token with `read:packages`; skip this if the
-package is made public like the runner image):
+SeaweedFS pre-creates the `gomods` and `verdaccio` buckets on startup (Athens
+also self-creates `gomods` as a backstop); verify with:
 
 ```bash
-kubectl create namespace verdaccio --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n verdaccio create secret docker-registry ghcr-pull \
-  --docker-server=ghcr.io --docker-username=<gh-user> \
-  --docker-password=$(gh auth token)
+kubectl -n seaweedfs exec deploy/seaweedfs -- sh -c "echo s3.bucket.list | weed shell"
 ```
 
-SeaweedFS pre-creates the `gomods` and `verdaccio` buckets on startup (Athens
-also self-creates `gomods` as a backstop). See
-[Object storage: SeaweedFS](#object-storage-seaweedfs) for why both proxies use
-object storage rather than local disk, and the note that **Verdaccio needs the
-custom S3 image built first** ([BUILD.md](BUILD.md)).
+See [Object storage: SeaweedFS](#object-storage-seaweedfs) for why both proxies
+use object storage rather than local disk, and the note that **Verdaccio needs
+the custom S3 image built first** ([BUILD.md](BUILD.md)).
 
 The registry deploy above is enough for the cluster itself; for **consumers** to
 push/pull over `:5000` it also needs a one-time node-level config (DNS + a
