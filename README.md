@@ -70,15 +70,23 @@ kubectl -n arc-runners create secret generic gh-config \
   --from-literal=github_token=$GH_TOKEN
 ```
 
-### 5. Apply the in-cluster mirrors
+### 5. Apply the in-cluster mirrors and registry
 
 ```bash
 kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
-kubectl get ns athens verdaccio
+kubectl apply -f registry/registry.yaml
+kubectl apply -f registry/gc-cronjob.yaml
+kubectl get ns athens verdaccio registry
 kubectl -n athens rollout status deploy/athens
 kubectl -n verdaccio rollout status deploy/verdaccio
+kubectl -n registry rollout status deploy/registry
 ```
+
+The registry deploy above is enough for the cluster itself; for **consumers** to
+push/pull over `:5000` it also needs a one-time node-level config (DNS + a
+containerd HTTP mirror). See [本地 image registry](#本地-image-registry) for that
+node setup, the daily GC CronJob, and how each app's build wires into it.
 
 ### 6. Install the runner scale set
 
