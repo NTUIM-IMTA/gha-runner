@@ -3,6 +3,8 @@
 # - adds build-essential so `go test -race` (cgo) works
 # - pre-seeds /opt/hostedtoolcache so actions/setup-go and actions/setup-node
 #   hit "Found in cache" instead of downloading every run
+# - pre-seeds the action archive cache so "Download action repository" steps
+#   skip the per-job GitHub download (ephemeral pods re-download otherwise)
 FROM ghcr.io/actions/actions-runner:latest
 
 # Link the GHCR package to this repo so it shows up under
@@ -21,6 +23,11 @@ ARG NODE_VERSION=24.16.0
 # Point it at the persistent toolcache we pre-seed below so setup-go /
 # setup-node hit "Found in cache".
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache
+
+# Local cache of action tarballs ({owner}_{repo}/{sha}.tar.gz). The runner
+# checks this folder before downloading an action; on a miss it falls back to
+# downloading from GitHub, so stale SHAs degrade gracefully.
+ENV ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=/opt/action-archive-cache
 
 USER root
 
@@ -75,5 +82,28 @@ RUN set -eux; \
       | tar -xz -C "/opt/hostedtoolcache/node/${NODE_VERSION}/x64" --strip-components=1; \
     touch "/opt/hostedtoolcache/node/${NODE_VERSION}/x64.complete"; \
     chown -R runner:runner /opt/hostedtoolcache
+
+# 3) Pre-seed the action archive cache with the actions our workflows pin.
+#    SHAs are the commits the version tags currently resolve to; when a tag
+#    moves, the runner just re-downloads until this list is refreshed.
+RUN set -eux; \
+    seed() { \
+      dir="${ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE}/$(printf '%s' "$1" | tr '/' '_')"; \
+      mkdir -p "$dir"; \
+      curl -fsSL "https://codeload.github.com/$1/tar.gz/$2" -o "${dir}/$2.tar.gz"; \
+    }; \
+    # actions/checkout@v6
+    seed actions/checkout df4cb1c069e1874edd31b4311f1884172cec0e10; \
+    # docker/setup-buildx-action@v4
+    seed docker/setup-buildx-action d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5; \
+    # docker/login-action@v4
+    seed docker/login-action 650006c6eb7dba73a995cc03b0b2d7f5ca915bee; \
+    # docker/metadata-action@v6
+    seed docker/metadata-action 80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9; \
+    # docker/build-push-action@v7
+    seed docker/build-push-action f9f3042f7e2789586610d6e8b85c8f03e5195baf; \
+    # rjstone/discord-webhook-notify@v2
+    seed rjstone/discord-webhook-notify 510c47fe8d6583687298dc08f8d0306957b82a9b; \
+    chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
 
 USER runner
