@@ -12,7 +12,8 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 ├── athens/          # in-cluster Go module proxy manifest
 │   └── athens.yaml
 ├── seaweedfs/       # S3 object store backing Athens + Verdaccio (atomic writes)
-│   └── seaweedfs.yaml
+│   ├── seaweedfs.yaml
+│   └── cache-gc-cronjob.yaml  # watermark-based eviction for both cache buckets
 ├── verdaccio/       # in-cluster npm / pnpm registry mirror
 │   ├── verdaccio.yaml
 │   └── Dockerfile   # custom image: verdaccio + aws-s3-storage plugin
@@ -105,6 +106,7 @@ crash-loop until the S3 endpoint is up:
 
 ```bash
 kubectl apply -f seaweedfs/seaweedfs.yaml
+kubectl apply -f seaweedfs/cache-gc-cronjob.yaml
 kubectl -n seaweedfs rollout status deploy/seaweedfs
 kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
@@ -288,9 +290,23 @@ S3 client (its storage type is confusingly named `minio`, but the endpoint is
 SeaweedFS); Verdaccio talks to it via the `verdaccio-aws-s3-storage` plugin
 (AWS SDK v3) baked into a custom image (`verdaccio/Dockerfile`).
 
-The S3 access key/secret is one logical credential duplicated across three
-namespaces (the `seaweedfs-s3-config` Secret defines the server-side identity;
-`athens` and `verdaccio` each hold a matching Secret) and must be kept in sync.
+**Cache eviction.** Neither Athens nor Verdaccio ever deletes anything, and
+`local-path` does not enforce the PVC size, so both buckets would grow until the
+node disk fills. `seaweedfs/cache-gc-cronjob.yaml` runs daily and copies
+kubelet's image-GC design: per-bucket high/low watermarks (default 10 GiB / 8
+GiB). A bucket under the high watermark is never touched — unlike a TTL, hot
+entries are not expired and re-downloaded for no reason. Above it, the oldest
+objects are evicted until usage is back under the low watermark, and a `weed
+shell volume.vacuum` compacts the freed space. Evicted entries are simply cache
+misses: Athens treats a version as cached only if all three of its objects
+exist (`go.mod`, `<v>.info`, `source.zip`), so partial eviction self-heals, and
+Verdaccio re-fetches from npmjs (its package index `verdaccio-s3-db.json` is
+excluded from eviction).
+
+The S3 access key/secret is one logical credential duplicated across four
+Secrets (`seaweedfs-s3-config` defines the server-side identity; `athens`,
+`verdaccio`, and the cache-gc CronJob in `seaweedfs` each hold a matching
+client copy) and must be kept in sync.
 SeaweedFS is `ClusterIP`-only; the trust boundary is the PVE firewall, same as
 the image registry.
 

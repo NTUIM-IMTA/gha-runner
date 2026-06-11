@@ -27,8 +27,9 @@ metadata:
   name: seaweedfs
 ---
 # S3 identities (the "server side" credentials). The accessKey/secretKey here MUST
-# match the creds Athens (athens ns) and Verdaccio (verdaccio ns) use. To rotate:
-# edit this Secret + both consumer Secrets, re-apply, restart all three.
+# match the creds Athens (athens ns), Verdaccio (verdaccio ns) and the cache-gc
+# CronJob (this ns) use. To rotate: edit this Secret + the three consumer
+# Secrets, re-apply, restart the deployments (the CronJob picks it up next run).
 # "Admin" action grants bucket create + object read/write/list.
 apiVersion: v1
 kind: Secret

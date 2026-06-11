@@ -1,0 +1,118 @@
+# Size-triggered cache eviction for the SeaweedFS buckets (gomods, verdaccio).
+#
+# Apply: kubectl apply -f seaweedfs/cache-gc-cronjob.yaml
+#
+# Neither Athens nor Verdaccio evicts anything, and the local-path PVC size is
+# not enforced, so both buckets grow until the node disk fills. SeaweedFS's own
+# answer (s3.bucket.quota) only flips a full bucket to read-only — it stops
+# caching, it doesn't reclaim space. A TTL would reclaim space but expires
+# entries that are still hot, forcing pointless re-downloads.
+#
+# This job instead copies kubelet's image GC design: high/low watermarks.
+# Nothing is deleted while a bucket stays under HIGH_GIB; once it crosses, the
+# oldest objects (mtime = first-download time) are evicted until usage is back
+# under LOW_GIB. A quiet cache is never touched.
+#
+# Evicting is safe by construction:
+#  - Athens Exists() requires all 3 objects of a version (go.mod, <v>.info,
+#    source.zip; see gomods/athens pkg/storage/minio/checker.go), so a
+#    partially evicted version is a miss and gets re-fetched + re-saved whole.
+#  - Verdaccio re-fetches missing metadata/tarballs from npmjs on demand. Its
+#    package index (verdaccio-s3-db.json) is NOT a cache entry and is excluded.
+#
+# S3 deletes only mark space as garbage inside SeaweedFS volumes; the vacuum
+# container then compacts volumes so the disk space actually returns (the
+# master also auto-vacuums at 30% garbage, this just makes it deterministic).
+---
+# Client-side S3 credentials for rclone, injected via envFrom. They MUST match
+# the identity in the seaweedfs-s3-config Secret (same convention as the
+# athens / verdaccio namespaces).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seaweedfs-credentials
+  namespace: seaweedfs
+type: Opaque
+stringData:
+  RCLONE_CONFIG_SW_ACCESS_KEY_ID: gomods
+  RCLONE_CONFIG_SW_SECRET_ACCESS_KEY: gomods-athens-s3-storage
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cache-gc-script
+  namespace: seaweedfs
+data:
+  evict.sh: |
+    #!/bin/sh
+    set -eu
+    high=$((HIGH_GIB * 1024 * 1024 * 1024))
+    low=$((LOW_GIB * 1024 * 1024 * 1024))
+    for bucket in gomods verdaccio; do
+      # tsp = "<mtime>;<size>;<path>" — mtime first so plain sort = oldest first
+      rclone lsf -R --files-only --format tsp --separator ';' \
+        --exclude '/verdaccio-s3-db.json' "sw:$bucket" > /tmp/list
+      used=$(awk -F';' '{ s += $2 } END { printf "%.0f", s }' /tmp/list)
+      echo "$bucket: $((used / 1024 / 1024)) MiB used (high $((high / 1024 / 1024)) MiB, low $((low / 1024 / 1024)) MiB)"
+      [ "$used" -le "$high" ] && continue
+      sort /tmp/list | awk -F';' -v excess=$((used - low)) \
+        'freed < excess { print $3; freed += $2 }' > /tmp/evict
+      echo "$bucket: evicting $(wc -l < /tmp/evict) oldest objects"
+      rclone delete "sw:$bucket" --files-from /tmp/evict
+    done
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-gc
+  namespace: seaweedfs
+spec:
+  schedule: "30 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: evict
+              image: rclone/rclone:1.74
+              command: ["/bin/sh", "/scripts/evict.sh"]
+              env:
+                - name: RCLONE_CONFIG_SW_TYPE
+                  value: s3
+                - name: RCLONE_CONFIG_SW_PROVIDER
+                  value: Other
+                - name: RCLONE_CONFIG_SW_ENDPOINT
+                  value: http://seaweedfs.seaweedfs.svc.cluster.local:8333
+                - name: RCLONE_CONFIG_SW_FORCE_PATH_STYLE
+                  value: "true"
+                ## Per-bucket watermarks: start evicting above HIGH_GIB, stop
+                ## once back under LOW_GIB. Two buckets → worst case ~2x HIGH
+                ## total, sized against the 30Gi PVC request.
+                - name: HIGH_GIB
+                  value: "10"
+                - name: LOW_GIB
+                  value: "8"
+              envFrom:
+                - secretRef:
+                    name: seaweedfs-credentials
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+          containers:
+            - name: vacuum
+              image: chrislusf/seaweedfs:4.32
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  printf 'lock\nvolume.vacuum -garbageThreshold=0.1\nunlock\n' \
+                    | weed shell -master=seaweedfs.seaweedfs.svc.cluster.local:9333
+          volumes:
+            - name: script
+              configMap:
+                name: cache-gc-script
