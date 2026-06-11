@@ -296,8 +296,8 @@ node disk fills. `seaweedfs/cache-gc-cronjob.yaml` runs daily and copies
 kubelet's image-GC design: per-bucket high/low watermarks (default 10 GiB / 8
 GiB). A bucket under the high watermark is never touched — unlike a TTL, hot
 entries are not expired and re-downloaded for no reason. Above it, the oldest
-objects are evicted until usage is back under the low watermark, and a `weed
-shell volume.vacuum` compacts the freed space. Evicted entries are simply cache
+objects are evicted until usage is back under the low watermark, and a call to
+the master's `/vol/vacuum` HTTP endpoint compacts the freed space. Evicted entries are simply cache
 misses: Athens treats a version as cached only if all three of its objects
 exist (`go.mod`, `<v>.info`, `source.zip`), so partial eviction self-heals, and
 Verdaccio re-fetches from npmjs (its package index `verdaccio-s3-db.json` is

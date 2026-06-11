@@ -23,6 +23,10 @@
 # S3 deletes only mark space as garbage inside SeaweedFS volumes; the vacuum
 # container then compacts volumes so the disk space actually returns (the
 # master also auto-vacuums at 30% garbage, this just makes it deterministic).
+# Vacuum goes through the master's HTTP /vol/vacuum endpoint: weed shell would
+# need the master gRPC port (HTTP port + 10000 = 19333), which the Service does
+# not expose. The call is synchronous and scans every volume, so give it a
+# generous timeout.
 ---
 # Client-side S3 credentials for rclone, injected via envFrom. They MUST match
 # the identity in the seaweedfs-s3-config Secret (same convention as the
@@ -105,13 +109,14 @@ spec:
                   mountPath: /scripts
           containers:
             - name: vacuum
-              image: chrislusf/seaweedfs:4.32
+              image: busybox:1.37
               command:
                 - /bin/sh
                 - -c
                 - |
-                  printf 'lock\nvolume.vacuum -garbageThreshold=0.1\nunlock\n' \
-                    | weed shell -master=seaweedfs.seaweedfs.svc.cluster.local:9333
+                  wget -T 600 -qO- \
+                    "http://seaweedfs.seaweedfs.svc.cluster.local:9333/vol/vacuum?garbageThreshold=0.1" \
+                    && echo && echo "vacuum done"
           volumes:
             - name: script
               configMap:
