@@ -86,6 +86,12 @@ RUN set -eux; \
 # 3) Pre-seed the action archive cache with the actions our workflows pin.
 #    SHAs are the commits the version tags currently resolve to; when a tag
 #    moves, the runner just re-downloads until this list is refreshed.
+#    Find the SHA either way:
+#      - any job log's "Set up job" step prints it:
+#        Download action repository 'actions/checkout@v6' (SHA:df4cb1c0...)
+#        (on a cache hit that line disappears — seeing it again means the tag
+#        moved and this list needs a refresh)
+#      - resolve it directly: gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
 RUN set -eux; \
     seed() { \
       dir="${ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE}/$(printf '%s' "$1" | tr '/' '_')"; \
