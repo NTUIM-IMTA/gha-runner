@@ -104,6 +104,14 @@ RUN set -eux; \
     seed docker/build-push-action f9f3042f7e2789586610d6e8b85c8f03e5195baf; \
     # rjstone/discord-webhook-notify@v2
     seed rjstone/discord-webhook-notify 510c47fe8d6583687298dc08f8d0306957b82a9b; \
+    # actions/checkout@v4 (README workflow conventions, consumer CI jobs)
+    seed actions/checkout 34e114876b0b11c390a56381ad16ebd13914f8d5; \
+    # actions/setup-go@v5
+    seed actions/setup-go 40f1582b2485089dde7abd97c1529aa768e1baff; \
+    # actions/setup-node@v4
+    seed actions/setup-node 49933ea5288caeca8642d1e84afbd3f7d6820020; \
+    # pnpm/action-setup@v4
+    seed pnpm/action-setup b906affcce14559ad1aafd4ab0e942779e9f58b1; \
     chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
 
 USER runner
