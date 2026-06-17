@@ -1,6 +1,6 @@
 # Appendix: Building the runner image
 
-The runner image `ghcr.io/ntuim-imta/gha-runner:go1.26-node24` is **already
+The runner image `ghcr.io/ntuim-imta/gha-runner:go1.26-node26` is **already
 built and public** on GHCR, so a fresh cluster install can skip this entirely —
 [README](README.md) step 6 pulls it directly. You only need this page when
 **creating a new Go/Node combo** or **rebuilding** an existing tag.
@@ -24,12 +24,12 @@ and
 [actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json):
 
 ```bash
-docker buildx build go1.26-node24 \
+docker buildx build go1.26-node26 \
   --platform linux/amd64 \
-  --build-arg GO_VERSION=1.26.3 \
-  --build-arg NODE_VERSION=24.16.0 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.26-node24 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.26.3-node24.16.0 \
+  --build-arg GO_VERSION=1.26.4 \
+  --build-arg NODE_VERSION=26.3.0 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.26-node26 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.26.4-node26.3.0 \
   --push
 ```
 

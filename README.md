@@ -229,7 +229,7 @@ template:
   spec:
     containers:
       - name: runner
-        image: ghcr.io/ntuim-imta/gha-runner:go1.26-node24
+        image: ghcr.io/ntuim-imta/gha-runner:go1.26-node26
         imagePullPolicy: Always
 ```
 
