@@ -61,7 +61,7 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      storage: 30Gi
+      storage: 200Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -131,10 +131,10 @@ spec:
             periodSeconds: 30
           resources:
             requests:
-              cpu: 100m
+              cpu: 50m
               memory: 256Mi
             limits:
-              memory: 2Gi
+              memory: 4Gi
       volumes:
         - name: data
           persistentVolumeClaim:
