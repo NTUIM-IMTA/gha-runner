@@ -10,16 +10,63 @@
 ## Single-node k3s has limited headroom: each runner pod also brings a
 ## privileged dind sidecar, so concurrent jobs scale at ~2x the pod count.
 ## Watch node CPU / memory under load before bumping further.
-maxRunners: 4
+maxRunners: 8
 
-## containerMode dind injects a docker:dind sidecar + shared /var/run,
-## so `docker/setup-buildx-action` and any plain `docker build` work
-## from inside the runner.
-containerMode:
-  type: dind
-
+## dind sidecar — explicit template instead of `containerMode: dind`.
+##
+## The chart's auto-injected dind sidecar accepts no extra dockerd flags, and
+## we need --registry-mirror so the per-job docker daemon pulls Docker Hub
+## images (integration/e2e service containers: postgres, redis, …) through the
+## in-cluster pull-through cache (dockerhub-mirror/). So this template is a
+## verbatim copy of what `helm template` renders for containerMode dind on
+## chart 0.14.2, plus the marked deltas. When bumping the chart version,
+## re-render with `containerMode: {type: dind}` and re-diff this block.
 template:
   spec:
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/ntuim-imta/gha-runner:go1.26-node26
+        command: ["cp"]
+        args: ["-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
+      ## Native sidecar: an initContainer with restartPolicy Always keeps
+      ## running alongside the runner container (same shape the chart renders).
+      - name: dind
+        image: docker:dind
+        args:
+          - dockerd
+          - --host=unix:///var/run/docker.sock
+          - --group=$(DOCKER_GROUP_GID)
+          ## [delta] Route Docker Hub pulls through the in-cluster pull-through
+          ## cache (dockerhub-mirror/). Only docker.io is mirrored — ghcr.io
+          ## etc. still go direct — and dockerd falls back to Docker Hub when
+          ## the mirror is unreachable. The mirror is plain HTTP inside the
+          ## cluster, so it must also be marked insecure.
+          - --registry-mirror=http://dockerhub-mirror.dockerhub-mirror.svc.cluster.local:5000
+          - --insecure-registry=dockerhub-mirror.dockerhub-mirror.svc.cluster.local:5000
+        env:
+          - name: DOCKER_GROUP_GID
+            value: "123"
+        securityContext:
+          privileged: true
+        restartPolicy: Always
+        startupProbe:
+          exec:
+            command:
+              - docker
+              - info
+          initialDelaySeconds: 0
+          failureThreshold: 24
+          periodSeconds: 5
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
+          - name: dind-externals
+            mountPath: /home/runner/externals
     containers:
       - name: runner
         image: ghcr.io/ntuim-imta/gha-runner:go1.26-node26
@@ -35,4 +82,26 @@ template:
           ## Route npm / pnpm / yarn through the in-cluster Verdaccio mirror.
           - name: NPM_CONFIG_REGISTRY
             value: http://verdaccio.verdaccio.svc.cluster.local:4873/
+          ## [delta] Route `playwright install` browser downloads through the
+          ## in-cluster CDN cache (playwright-cache/). Single host, no
+          ## fallback chain — see that manifest's header.
+          - name: PLAYWRIGHT_DOWNLOAD_HOST
+            value: http://playwright-cache.playwright-cache.svc.cluster.local
+          ## The two below are what containerMode dind used to inject.
+          - name: DOCKER_HOST
+            value: unix:///var/run/docker.sock
+          - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
+            value: "120"
+        volumeMounts:
+          - name: work
+            mountPath: /home/runner/_work
+          - name: dind-sock
+            mountPath: /var/run
         # If the package is private, add an imagePullSecret here.
+    volumes:
+      - name: dind-sock
+        emptyDir: {}
+      - name: dind-externals
+        emptyDir: {}
+      - name: work
+        emptyDir: {}

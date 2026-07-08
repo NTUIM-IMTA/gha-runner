@@ -1,0 +1,163 @@
+# In-cluster Playwright browser CDN cache (nginx proxy_cache)
+#
+# Apply: kubectl apply -f playwright-cache/playwright-cache.yaml
+# Runners use it via PLAYWRIGHT_DOWNLOAD_HOST (set in gha-runner values.yaml).
+#
+# Why: every e2e job runs `playwright install chromium`, which downloads a
+# ~170 MB browser build from https://cdn.playwright.dev — runner pods are
+# ephemeral, so the download repeats on every run. Playwright honours
+# PLAYWRIGHT_DOWNLOAD_HOST by swapping only the host part of the download URL,
+# so this nginx caches whatever path the installed Playwright version asks for
+# (no version pinning here; a Playwright bump is just a one-time cache miss).
+#
+# Poison-cache safety: nginx only commits a response to proxy_cache after
+# receiving it in full (spooled to use_temp_path/off temp area, then atomic
+# rename), so a dropped upstream connection is never cached. Eviction is
+# max_size + inactive= LRU, handled by the cache manager.
+#
+# No fallback chain: unlike GOPROXY, PLAYWRIGHT_DOWNLOAD_HOST is a single
+# host — if this pod is down, e2e browser installs fail until it is back.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: playwright-cache
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: playwright-cache-config
+  namespace: playwright-cache
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events {
+      worker_connections 1024;
+    }
+    http {
+      # Browser builds are immutable per path (revision in the URL), so cache
+      # by URI for a long time and evict by LRU. 8g max_size stays under the
+      # 10Gi PVC.
+      proxy_cache_path /var/cache/nginx/playwright levels=1:2
+                       keys_zone=playwright:10m max_size=8g inactive=90d
+                       use_temp_path=off;
+
+      server {
+        listen 80;
+
+        location = /healthz {
+          return 200;
+        }
+
+        location / {
+          # Re-resolve the CDN hostname through CoreDNS (k3s default ClusterIP
+          # 10.43.0.10) instead of pinning the IP nginx saw at startup — the
+          # CDN rotates addresses. Variable proxy_pass forces per-request
+          # resolution and passes the original request URI through unchanged.
+          resolver 10.43.0.10 valid=300s ipv6=off;
+          set $upstream "https://cdn.playwright.dev";
+          proxy_pass $upstream;
+
+          proxy_set_header Host cdn.playwright.dev;
+          proxy_ssl_server_name on;
+          proxy_ssl_name cdn.playwright.dev;
+          proxy_ssl_protocols TLSv1.2 TLSv1.3;
+          proxy_http_version 1.1;
+
+          proxy_cache playwright;
+          proxy_cache_key $uri;
+          proxy_cache_valid 200 90d;
+          # Collapse concurrent first-downloads of the same build into one
+          # upstream fetch (several e2e jobs can start together).
+          proxy_cache_lock on;
+          proxy_cache_lock_age 300s;
+          proxy_cache_lock_timeout 300s;
+          proxy_cache_use_stale error timeout updating;
+          # The CDN's cache headers are irrelevant here; our TTL rules above win.
+          proxy_ignore_headers Cache-Control Expires Set-Cookie Vary;
+
+          proxy_connect_timeout 30s;
+          proxy_read_timeout 300s;
+          proxy_max_temp_file_size 2048m;
+
+          add_header X-Cache-Status $upstream_cache_status;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: playwright-cache-data
+  namespace: playwright-cache
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playwright-cache
+  namespace: playwright-cache
+  labels:
+    app: playwright-cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC: avoid two pods racing on rollout
+  selector:
+    matchLabels:
+      app: playwright-cache
+  template:
+    metadata:
+      labels:
+        app: playwright-cache
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.29-alpine
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: cache
+              mountPath: /var/cache/nginx
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: playwright-cache-config
+        - name: cache
+          persistentVolumeClaim:
+            claimName: playwright-cache-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playwright-cache
+  namespace: playwright-cache
+spec:
+  type: ClusterIP
+  selector:
+    app: playwright-cache
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

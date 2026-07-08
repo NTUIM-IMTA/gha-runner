@@ -1,0 +1,107 @@
+# In-cluster Docker Hub pull-through cache (registry:2 in proxy mode)
+#
+# Apply: kubectl apply -f dockerhub-mirror/dockerhub-mirror.yaml
+# Runners use it via the dind sidecar's --registry-mirror flag (values.yaml).
+#
+# Why: the consumer CI's integration + e2e jobs declare service containers
+# (postgres:18-alpine, redis:8-alpine, …) that the per-job dind daemon pulls
+# from Docker Hub on EVERY run — runner pods are ephemeral, so nothing is
+# reused. This mirror keeps one local copy and shields the cluster from Docker
+# Hub rate limits. Only docker.io pulls are mirrored; ghcr.io etc. still go
+# direct, and dockerd falls back to Docker Hub if the mirror is down.
+#
+# Storage is a plain PVC, unlike Athens/Verdaccio (SeaweedFS S3): the
+# distribution registry only commits a blob after the full upstream fetch
+# passes digest verification, so a crash mid-download never leaves a readable
+# truncated blob — the poison-cache failure mode those two needed S3 for
+# cannot happen here. Eviction is also built in: proxied content expires after
+# REGISTRY_PROXY_TTL and the registry deletes it itself.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dockerhub-mirror
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dockerhub-mirror-data
+  namespace: dockerhub-mirror
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dockerhub-mirror
+  namespace: dockerhub-mirror
+  labels:
+    app: dockerhub-mirror
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC: avoid two pods racing on rollout
+  selector:
+    matchLabels:
+      app: dockerhub-mirror
+  template:
+    metadata:
+      labels:
+        app: dockerhub-mirror
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+              name: http
+          env:
+            - name: REGISTRY_HTTP_ADDR
+              value: ":5000"
+            ## Proxy mode: serve from cache, fetch misses from Docker Hub.
+            - name: REGISTRY_PROXY_REMOTEURL
+              value: https://registry-1.docker.io
+            ## Cached content expires after this TTL and is deleted by the
+            ## registry's own scheduler (needs delete enabled below). Hot
+            ## images are simply re-fetched on the next pull.
+            - name: REGISTRY_PROXY_TTL
+              value: 168h
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: dockerhub-mirror-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dockerhub-mirror
+  namespace: dockerhub-mirror
+spec:
+  type: ClusterIP
+  selector:
+    app: dockerhub-mirror
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: http

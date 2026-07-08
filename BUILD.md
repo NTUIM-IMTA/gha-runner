@@ -8,6 +8,13 @@ built and public** on GHCR, so a fresh cluster install can skip this entirely â€
 One folder per Go/Node combo lives at the repo root (e.g. `go1.26-node24/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` build args.
 
+> **Note:** `go1.26-node26` also bakes in chromium's system libraries
+> (`playwright install-deps`) and qpdf + ghostscript. The consumer e2e jobs
+> run `playwright install chromium` **without** `--with-deps` on the
+> self-hosted target, so they depend on a runner image built from the current
+> Dockerfile â€” re-push this tag before merging CI changes that drop
+> `--with-deps`.
+
 ## 1. Log in to GHCR (once per machine)
 
 ```bash

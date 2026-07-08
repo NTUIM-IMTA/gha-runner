@@ -32,17 +32,23 @@ ENV ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=/opt/action-archive-cache
 USER root
 
 # 1) C toolchain + common build deps + docker CLI (the daemon lives in a
-#    dind sidecar; this image only needs the client side)
+#    dind sidecar; this image only needs the client side).
+#    qpdf + ghostscript are for the print repo's CI (backend-test /
+#    backend-integration / e2e shell out to them); its "Install PDF tooling"
+#    steps guard with `command -v`, so baking them here turns those apt-get
+#    runs into no-ops.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       build-essential \
       ca-certificates \
       curl \
+      ghostscript \
       git \
       gnupg \
       jq \
       pkg-config \
+      qpdf \
       unzip; \
     install -m 0755 -d /etc/apt/keyrings; \
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc; \
@@ -119,5 +125,17 @@ RUN set -eux; \
     # pnpm/action-setup@v4
     seed pnpm/action-setup b906affcce14559ad1aafd4ab0e942779e9f58b1; \
     chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
+
+# 4) System libraries for Playwright's chromium, so the consumer e2e jobs can
+#    run `playwright install chromium` WITHOUT `--with-deps` (no per-job
+#    apt-get; the browser binary itself comes through the in-cluster
+#    playwright-cache). The library list is stable across Playwright versions;
+#    install-deps re-resolves it at build time. Uses the Node seeded in step 2.
+RUN set -eux; \
+    export PATH="/opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin:${PATH}"; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    npx --yes playwright install-deps chromium; \
+    rm -rf /var/lib/apt/lists/* /root/.npm
 
 USER runner

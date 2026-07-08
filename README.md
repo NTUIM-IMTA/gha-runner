@@ -17,6 +17,10 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 ├── verdaccio/       # in-cluster npm / pnpm registry mirror
 │   ├── verdaccio.yaml
 │   └── Dockerfile   # custom image: verdaccio + aws-s3-storage plugin
+├── dockerhub-mirror/  # Docker Hub pull-through cache (CI service containers)
+│   └── dockerhub-mirror.yaml
+├── playwright-cache/  # Playwright browser CDN cache (CI e2e jobs)
+│   └── playwright-cache.yaml
 ├── registry/        # in-cluster image registry + daily GC cronjob
 │   ├── registry.yaml
 │   └── gc-cronjob.yaml
@@ -110,10 +114,14 @@ kubectl apply -f seaweedfs/cache-gc-cronjob.yaml
 kubectl -n seaweedfs rollout status deploy/seaweedfs
 kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
+kubectl apply -f dockerhub-mirror/dockerhub-mirror.yaml
+kubectl apply -f playwright-cache/playwright-cache.yaml
 kubectl apply -f registry/registry.yaml
 kubectl apply -f registry/gc-cronjob.yaml
 kubectl -n athens rollout status deploy/athens
 kubectl -n verdaccio rollout status deploy/verdaccio
+kubectl -n dockerhub-mirror rollout status deploy/dockerhub-mirror
+kubectl -n playwright-cache rollout status deploy/playwright-cache
 kubectl -n registry rollout status deploy/registry
 ```
 
@@ -135,9 +143,10 @@ node setup, the daily GC CronJob, and how each app's build wires into it.
 
 ### 6. Install the runner scale set
 
-`values.yaml` carries the runner image, dind, `maxRunners`, `GOPROXY`,
-and `NPM_CONFIG_REGISTRY` — the chart picks up the rest from the controller
-install. The image it pins is prebuilt and public on GHCR; rebuilding it is a
+`values.yaml` carries the runner image, the explicit dind sidecar (with the
+Docker Hub mirror wiring), `maxRunners`, `GOPROXY`, `NPM_CONFIG_REGISTRY`,
+and `PLAYWRIGHT_DOWNLOAD_HOST` — the chart picks up the rest from the
+controller install. The image it pins is prebuilt and public on GHCR; rebuilding it is a
 one-time task — see [Appendix: Building the runner image](BUILD.md).
 
 Runners register into the org's **`Default`** runner group (no `runnerGroup`
@@ -206,21 +215,37 @@ maxRunners: 4
 | Value | Peak pods | Notes |
 |---|---|---|
 | 2 | ~4 | Diagnosing OOM |
-| 4 | ~8 | Current setting (default) |
-| 8 | ~16 | Only after checking node headroom |
+| 4 | ~8 | Safe default |
+| 8 | ~16 | Current setting — watch node headroom |
 | 16+ | risky | Only after scaling the node |
 
 Watch `kubectl top node` while runs queue; bump down on memory pressure.
 
-### dind sidecar (`containerMode`)
+### dind sidecar (explicit template, was `containerMode: dind`)
 
-```yaml
-containerMode:
-  type: dind
+`values.yaml` no longer uses `containerMode: dind` — the chart's auto-injected
+dind sidecar accepts no extra dockerd flags, and we pass `--registry-mirror`
+(see [Docker Hub mirror](#docker-hub-mirror--playwright-cdn-cache)). Instead,
+the pod template is an explicit verbatim copy of what the chart would render
+for containerMode dind on 0.14.2, plus the `[delta]`-marked additions.
+
+Removing the dind block entirely disables `docker/setup-buildx-action`, any
+`docker build`, and every `services:` block in consumer workflows ("cannot
+connect to docker daemon").
+
+**When bumping the chart version**: re-render the auto-injected shape and
+re-diff the template block in `values.yaml`:
+
+```bash
+helm template my-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --version <new-version> -n arc-runners \
+  --set githubConfigUrl=https://github.com/NTUIM-IMTA \
+  --set githubConfigSecret=gh-config \
+  --set controllerServiceAccount.namespace=arc-systems \
+  --set controllerServiceAccount.name=arc-gha-rs-controller \
+  --set containerMode.type=dind
 ```
-
-Disables: `docker/setup-buildx-action` and any `docker build` in the workflow
-will fail with "cannot connect to docker daemon".
 
 ### Runner image
 
@@ -256,6 +281,32 @@ env:
 
 Honoured by npm, pnpm, and yarn. Verdaccio proxies missing packages to
 `registry.npmjs.org` and caches them on its PVC.
+
+## Docker Hub mirror + Playwright CDN cache
+
+The consumer CI's **integration and e2e jobs** pull more than Go modules and
+npm packages, and runner pods are ephemeral — without a local cache these
+downloads repeat on every single run:
+
+| What | Cached by | Wired up via |
+|---|---|---|
+| `services:` images (postgres, redis, …) | `dockerhub-mirror/` — registry:2 pull-through cache | dind `--registry-mirror` flag in `values.yaml` |
+| `playwright install chromium` (~170 MB) | `playwright-cache/` — nginx `proxy_cache` in front of `cdn.playwright.dev` | `PLAYWRIGHT_DOWNLOAD_HOST` env in `values.yaml` |
+| chromium system libs / qpdf + ghostscript | baked into the runner image ([BUILD.md](BUILD.md)) | e2e jobs pass `--with-deps` only on the `gha` target |
+
+Notes:
+
+- The mirror only covers `docker.io` pulls; `ghcr.io` etc. go direct. If the
+  mirror is down, dockerd falls back to Docker Hub transparently.
+- Mirrored content self-expires (`REGISTRY_PROXY_TTL`, 168h); the nginx cache
+  evicts by LRU (`max_size=8g`, `inactive=90d`). Neither bucket needs the
+  SeaweedFS cache-gc CronJob.
+- `PLAYWRIGHT_DOWNLOAD_HOST` has **no fallback chain** — if the cache pod is
+  down, e2e browser installs fail until it is back
+  (`kubectl -n playwright-cache rollout status deploy/playwright-cache`).
+- Verify a cache hit: re-run any e2e job and check the nginx logs
+  (`kubectl -n playwright-cache logs deploy/playwright-cache`) or the
+  `X-Cache-Status: HIT` response header.
 
 ## Object storage: SeaweedFS
 
@@ -394,6 +445,8 @@ helm uninstall my-runners -n arc-runners
 helm uninstall arc -n arc-systems
 kubectl delete -f athens/athens.yaml
 kubectl delete -f verdaccio/verdaccio.yaml
+kubectl delete -f dockerhub-mirror/dockerhub-mirror.yaml
+kubectl delete -f playwright-cache/playwright-cache.yaml
 kubectl delete -f seaweedfs/seaweedfs.yaml
 kubectl delete -f registry/gc-cronjob.yaml
 kubectl delete -f registry/registry.yaml
