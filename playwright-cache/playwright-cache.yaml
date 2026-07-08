@@ -45,16 +45,19 @@ data:
       server {
         listen 80;
 
+        # Re-resolve upstream hostnames through CoreDNS (k3s default ClusterIP
+        # 10.43.0.10) instead of pinning the IP nginx saw at startup — the CDN
+        # rotates addresses. Variable proxy_pass forces per-request resolution.
+        resolver 10.43.0.10 valid=300s ipv6=off;
+        # Allow the 3xx-follow chain below to hop more than once.
+        recursive_error_pages on;
+
         location = /healthz {
           return 200;
         }
 
         location / {
-          # Re-resolve the CDN hostname through CoreDNS (k3s default ClusterIP
-          # 10.43.0.10) instead of pinning the IP nginx saw at startup — the
-          # CDN rotates addresses. Variable proxy_pass forces per-request
-          # resolution and passes the original request URI through unchanged.
-          resolver 10.43.0.10 valid=300s ipv6=off;
+          # Variable proxy_pass passes the original request URI through unchanged.
           set $upstream "https://cdn.playwright.dev";
           proxy_pass $upstream;
 
@@ -79,6 +82,47 @@ data:
           proxy_connect_timeout 30s;
           proxy_read_timeout 300s;
           proxy_max_temp_file_size 2048m;
+
+          # The CDN answers some paths (e.g. Chrome-for-Testing builds) with a
+          # 307 to storage.googleapis.com. Passing that through would make the
+          # client fetch the bytes from the external host directly, bypassing
+          # this cache entirely — so follow redirects server-side instead and
+          # cache the final 200 under the ORIGINAL request URI.
+          proxy_intercept_errors on;
+          error_page 301 302 307 308 = @follow_redirect;
+
+          add_header X-Cache-Status $upstream_cache_status;
+        }
+
+        location @follow_redirect {
+          set $redirect_target $upstream_http_location;
+          proxy_pass $redirect_target;
+
+          # Host/SNI default to the redirect target's hostname ($proxy_host).
+          proxy_set_header Host $proxy_host;
+          proxy_ssl_server_name on;
+          proxy_ssl_protocols TLSv1.2 TLSv1.3;
+          proxy_http_version 1.1;
+
+          # Same zone + same key as location /: the 200 stored here satisfies
+          # future lookups there, so only the first request per build follows
+          # the redirect chain at all.
+          proxy_cache playwright;
+          proxy_cache_key $uri;
+          proxy_cache_valid 200 90d;
+          proxy_cache_lock on;
+          proxy_cache_lock_age 300s;
+          proxy_cache_lock_timeout 300s;
+          proxy_cache_use_stale error timeout updating;
+          proxy_ignore_headers Cache-Control Expires Set-Cookie Vary;
+
+          proxy_connect_timeout 30s;
+          proxy_read_timeout 300s;
+          proxy_max_temp_file_size 2048m;
+
+          # A redirect may hop again (recursive_error_pages caps the chain).
+          proxy_intercept_errors on;
+          error_page 301 302 307 308 = @follow_redirect;
 
           add_header X-Cache-Status $upstream_cache_status;
         }
