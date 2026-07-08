@@ -233,6 +233,14 @@ Removing the dind block entirely disables `docker/setup-buildx-action`, any
 `docker build`, and every `services:` block in consumer workflows ("cannot
 connect to docker daemon").
 
+> **Migration gotcha:** a release installed with `containerMode: dind` keeps
+> that value in its stored release values, and `--reuse-values` merges it with
+> this file — the chart then injects a second dind ("Duplicate value:
+> dind-sock/dind"). The switch to the explicit template needs ONE upgrade
+> without `--reuse-values` (pass `--set githubConfigUrl=… --set
+> githubConfigSecret=gh-config` alongside `-f values.yaml`); afterwards
+> `--reuse-values` works again.
+
 **When bumping the chart version**: re-render the auto-injected shape and
 re-diff the template block in `values.yaml`:
 
