@@ -42,6 +42,17 @@ data:
                        keys_zone=playwright:10m max_size=8g inactive=90d
                        use_temp_path=off;
 
+      # Redirect targets the @follow_redirect hop may proxy to. Anything else
+      # (http://, internal hosts, attacker-controlled Location) gets a 502
+      # instead of being fetched and cached — the Location header is only as
+      # trustworthy as the upstream TLS connection it arrived on.
+      map $upstream_http_location $redirect_allowed {
+        ~^https://storage\.googleapis\.com/                    1;
+        ~^https://cdn\.playwright\.dev/                        1;
+        ~^https://playwright\.download\.prss\.microsoft\.com/  1;
+        default                                                0;
+      }
+
       server {
         listen 80;
 
@@ -49,8 +60,14 @@ data:
         # 10.43.0.10) instead of pinning the IP nginx saw at startup — the CDN
         # rotates addresses. Variable proxy_pass forces per-request resolution.
         resolver 10.43.0.10 valid=300s ipv6=off;
-        # Allow the 3xx-follow chain below to hop more than once.
+        # Allow the 3xx-follow chain below to hop more than once (nginx caps
+        # internal redirects at 10, bounding the chain).
         recursive_error_pages on;
+        # Verify upstream TLS certs (off by default in nginx!) so a spoofed
+        # cdn.playwright.dev cannot hand us a malicious Location to follow.
+        proxy_ssl_verify on;
+        proxy_ssl_verify_depth 3;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
 
         location = /healthz {
           return 200;
@@ -95,6 +112,10 @@ data:
         }
 
         location @follow_redirect {
+          # Refuse to follow redirects outside the https allowlist (see map).
+          if ($redirect_allowed = 0) {
+            return 502;
+          }
           set $redirect_target $upstream_http_location;
           proxy_pass $redirect_target;
 
