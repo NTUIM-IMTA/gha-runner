@@ -37,6 +37,8 @@ USER root
 #    backend-integration / e2e shell out to them); its "Install PDF tooling"
 #    steps guard with `command -v`, so baking them here turns those apt-get
 #    runs into no-ops.
+#    netcat-openbsd provides `nc`, which service-readiness gates use
+#    (`nc -z localhost <port>`); the base runner image ships without it.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -47,6 +49,7 @@ RUN set -eux; \
       git \
       gnupg \
       jq \
+      netcat-openbsd \
       pkg-config \
       qpdf \
       unzip; \
