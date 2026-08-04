@@ -5,7 +5,7 @@ built and public** on GHCR, so a fresh cluster install can skip this entirely â€
 [README](README.md) step 6 pulls it directly. You only need this page when
 **creating a new Go/Node combo** or **rebuilding** an existing tag.
 
-One folder per Go/Node combo lives at the repo root (e.g. `go1.26-node24/`),
+One folder per Go/Node combo lives at the repo root (e.g. `go1.26-node26/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` build args.
 
 > **Note:** `go1.26-node26` also bakes in chromium's system libraries
@@ -33,14 +33,14 @@ and
 ```bash
 docker buildx build go1.26-node26 \
   --platform linux/amd64 \
-  --build-arg GO_VERSION=1.26.4 \
-  --build-arg NODE_VERSION=26.3.0 \
+  --build-arg GO_VERSION=1.26.5 \
+  --build-arg NODE_VERSION=26.6.0 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.26-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.26.4-node26.3.0 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.26.5-node26.6.0 \
   --push
 ```
 
-The floating tag (`go1.26-node24`) is what `values.yaml` pins. With
+The floating tag (`go1.26-node26`) is what `values.yaml` pins. With
 `imagePullPolicy: Always`, re-pushing the same tag goes live on the next job
 with no helm change.
 

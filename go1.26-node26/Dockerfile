@@ -16,8 +16,8 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 # Check the latest published patch at:
 #   https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
-ARG GO_VERSION=1.26.4
-ARG NODE_VERSION=26.3.0
+ARG GO_VERSION=1.26.5
+ARG NODE_VERSION=26.6.0
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
 # Point it at the persistent toolcache we pre-seed below so setup-go /

@@ -7,7 +7,7 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 
 ```
 .
-├── go1.26-node24/   # custom runner image (one folder per Go/Node combo)
+├── go1.26-node26/   # custom runner image (one folder per Go/Node combo)
 │   └── Dockerfile
 ├── athens/          # in-cluster Go module proxy manifest
 │   └── athens.yaml
