@@ -7,6 +7,8 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 
 ```
 .
+├── .agents/skills/  # agent skills (.claude/skills and .codex/skills symlink here)
+│   └── runner-image-update/   # bump Go/Node/pnpm + refresh the action cache
 ├── go1.27-node26/   # custom runner image (one folder per Go/Node combo)
 │   └── Dockerfile
 ├── athens/          # in-cluster Go module proxy manifest
@@ -90,22 +92,10 @@ kubectl -n arc-runners create secret generic gh-config \
 
 ### 5. Apply the in-cluster mirrors and registry
 
-The custom `verdaccio-s3` image on GHCR is private, so the verdaccio namespace
-needs a pull secret **before** its deployment can start (a PAT with
-`read:packages`; skip this block if the package is made public like the runner
-image):
+Both custom images (`gha-runner`, `verdaccio-s3`) are **public** on GHCR, so no
+pull secret or `docker login` is needed on the cluster.
 
-```bash
-GH_USER=eric2969          # GitHub account that can read the package
-GHCR_TOKEN=ghp_xxx        # PAT with read:packages, never commit the real value
-kubectl create namespace verdaccio --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n verdaccio create secret docker-registry ghcr-pull \
-  --docker-server=ghcr.io --docker-username=$GH_USER \
-  --docker-password=$GHCR_TOKEN \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-Then the mirrors and the registry — SeaweedFS first, since Athens and Verdaccio
+Apply the mirrors and the registry — SeaweedFS first, since Athens and Verdaccio
 crash-loop until the S3 endpoint is up:
 
 ```bash

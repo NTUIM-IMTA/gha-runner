@@ -5,6 +5,10 @@ built and public** on GHCR, so a fresh cluster install can skip this entirely �
 [README](README.md) step 6 pulls it directly. You only need this page when
 **creating a new Go/Node combo** or **rebuilding** an existing tag.
 
+Routine bumps (newest Go / Node / pnpm / golangci-lint plus a refreshed action
+cache) are scripted in the `runner-image-update` skill under `.agents/skills/`;
+this page is the background for what that skill does.
+
 One folder per Go/Node combo lives at the repo root (e.g. `go1.27-node26/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` build args.
 
@@ -74,9 +78,9 @@ docker buildx build verdaccio \
   --push
 ```
 
-The manifest (`verdaccio/verdaccio.yaml`) pins this tag with
-`imagePullPolicy: Always`, so re-pushing the same tag goes live on the next pod
-restart. To bump: update the pinned `7.x-next@sha256:…` base digest (and/or
+The package is public on GHCR, so the cluster pulls it without a secret. The
+manifest (`verdaccio/verdaccio.yaml`) pins this tag with `imagePullPolicy: Always`,
+so re-pushing the same tag goes live on the next pod restart. To bump: update the pinned `7.x-next@sha256:…` base digest (and/or
 plugin version) in `verdaccio/Dockerfile`, then rebuild with the command above.
 Look up the current digest with
 `docker buildx imagetools inspect verdaccio/verdaccio:7.x-next`.
