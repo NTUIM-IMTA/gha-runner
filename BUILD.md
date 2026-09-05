@@ -1,14 +1,14 @@
 # Appendix: Building the runner image
 
-The runner image `ghcr.io/ntuim-imta/gha-runner:go1.26-node26` is **already
+The runner image `ghcr.io/ntuim-imta/gha-runner:go1.27-node26` is **already
 built and public** on GHCR, so a fresh cluster install can skip this entirely —
 [README](README.md) step 6 pulls it directly. You only need this page when
 **creating a new Go/Node combo** or **rebuilding** an existing tag.
 
-One folder per Go/Node combo lives at the repo root (e.g. `go1.26-node26/`),
+One folder per Go/Node combo lives at the repo root (e.g. `go1.27-node26/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` build args.
 
-> **Note:** `go1.26-node26` also bakes in chromium's system libraries
+> **Note:** `go1.27-node26` also bakes in chromium's system libraries
 > (`playwright install-deps`) and qpdf + ghostscript. The consumer e2e jobs
 > run `playwright install chromium` **without** `--with-deps` on the
 > self-hosted target, so they depend on a runner image built from the current
@@ -31,16 +31,16 @@ and
 [actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json):
 
 ```bash
-docker buildx build go1.26-node26 \
+docker buildx build go1.27-node26 \
   --platform linux/amd64 \
-  --build-arg GO_VERSION=1.26.5 \
-  --build-arg NODE_VERSION=26.6.0 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.26-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.26.5-node26.6.0 \
+  --build-arg GO_VERSION=1.27.1 \
+  --build-arg NODE_VERSION=26.8.1 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.8.1 \
   --push
 ```
 
-The floating tag (`go1.26-node26`) is what `values.yaml` pins. With
+The floating tag (`go1.27-node26`) is what `values.yaml` pins. With
 `imagePullPolicy: Always`, re-pushing the same tag goes live on the next job
 with no helm change.
 

@@ -12,12 +12,12 @@ FROM ghcr.io/actions/actions-runner:latest
 LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 
 # Must match the exact version setup-go / setup-node resolve to when the
-# workflow says `go-version: "1.26"` / `node-version: 26`.
+# workflow says `go-version: "1.27"` / `node-version: 26`.
 # Check the latest published patch at:
 #   https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
-ARG GO_VERSION=1.26.5
-ARG NODE_VERSION=26.6.0
+ARG GO_VERSION=1.27.1
+ARG NODE_VERSION=26.8.1
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
 # Point it at the persistent toolcache we pre-seed below so setup-go /
