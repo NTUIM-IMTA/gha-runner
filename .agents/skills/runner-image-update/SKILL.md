@@ -50,14 +50,15 @@ credentials** — push git commits from a machine with `gh auth`).
    1–2 (refresh SHA pins and their `# vX.Y.Z` comments); bump `go.mod`, Dockerfile base
    images, `packageManager`, docs. Run each repo's `make lint && make test`, commit,
    push.
-7. 🔴 **Verify CI**: every consumer's CI run on the new commit is green, and its
-   "Set up job" step shows no `Download action repository` line for seeded actions.
+7. 🔴 **Verify CI**: every consumer's CI run on the new commit is green, and every
+   `Download action repository ... (SHA:...)` line in "Set up job" names a SHA that
+   is in the seed list (the runner prints that line even on a cache hit).
 8. 🟡 **Commit gha-runner**: `Dockerfile`, `values.yaml`, `README.md`, `BUILD.md`; push
    from a machine with GitHub credentials (§5).
 
 **Pass criteria:** `imagetools inspect` shows the new digest on both tags; the
 AutoscalingRunnerSet image equals the floating tag in `values.yaml`; all five consumer
-CI runs are green with cache hits for every seeded action; gha-runner `main` contains
+CI runs are green and every action SHA in their logs is in the seed list; gha-runner `main` contains
 the Dockerfile with `ARG` values and a seed list matching what the consumers pin.
 
 ## References

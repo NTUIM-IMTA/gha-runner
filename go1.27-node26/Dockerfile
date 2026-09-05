@@ -98,8 +98,9 @@ RUN set -eux; \
 #    Find the SHA either way:
 #      - any job log's "Set up job" step prints it:
 #        Download action repository 'actions/checkout@v7' (SHA:3d3c42e5...)
-#        (on a cache hit that line disappears — seeing it again means the tag
-#        moved and this list needs a refresh)
+#        (the runner prints that line unconditionally, before it checks this
+#        cache; a hit is only visible with ACTIONS_STEP_DEBUG=true as
+#        "Copied action archive ... to ...". Compare the SHA with this list.)
 #      - resolve it directly: gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
 RUN set -eux; \
     seed() { \

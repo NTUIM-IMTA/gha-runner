@@ -105,8 +105,10 @@ for r in admission intranet theses print ws-management; do
   gh run list -R NTUIM-IMTA/$r --branch develop --limit 1 --json name,status,conclusion,headSha \
     --jq '.[] | "\(.name) \(.status) \(.conclusion) \(.headSha[0:8])"'
 done
-# A seeded action produces no "Download action repository" line in "Set up job"
-gh run view <run-id> -R NTUIM-IMTA/<repo> --log | grep -c 'Download action repository'
+# The runner always prints "Download action repository" (even on a cache hit; the hit
+# itself is only logged at debug level). Check that every SHA is in the seed list:
+gh run view <run-id> -R NTUIM-IMTA/<repo> --log \
+  | grep -oE "Download action repository '[^']*' \(SHA:[0-9a-f]{8}" | sort -u
 
 # gha-runner commit: the build host has no GitHub push credentials
 ssh imta@10.1.106.110 'cd ~/gha-runner && git add -A && git -c user.name=<name> -c user.email=<email> commit -m "..."'
