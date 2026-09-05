@@ -97,7 +97,7 @@ RUN set -eux; \
 #    moves, the runner just re-downloads until this list is refreshed.
 #    Find the SHA either way:
 #      - any job log's "Set up job" step prints it:
-#        Download action repository 'actions/checkout@v6' (SHA:df4cb1c0...)
+#        Download action repository 'actions/checkout@v7' (SHA:3d3c42e5...)
 #        (on a cache hit that line disappears — seeing it again means the tag
 #        moved and this list needs a refresh)
 #      - resolve it directly: gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
@@ -107,26 +107,32 @@ RUN set -eux; \
       mkdir -p "$dir"; \
       curl -fsSL "https://codeload.github.com/$1/tar.gz/$2" -o "${dir}/$2.tar.gz"; \
     }; \
-    # actions/checkout@v6
-    seed actions/checkout df4cb1c069e1874edd31b4311f1884172cec0e10; \
+    # actions/checkout@v7
+    seed actions/checkout 3d3c42e5aac5ba805825da76410c181273ba90b1; \
+    # actions/setup-go@v7
+    seed actions/setup-go b7ad1dad31e06c5925ef5d2fc7ad053ef454303e; \
+    # actions/setup-node@v7
+    seed actions/setup-node 820762786026740c76f36085b0efc47a31fe5020; \
+    # actions/upload-artifact@v7
+    seed actions/upload-artifact 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a; \
+    # actions/setup-python@v7
+    seed actions/setup-python 5fda3b95a4ea91299a34e894583c3862153e4b97; \
+    # pnpm/action-setup@v6
+    seed pnpm/action-setup 0977fd99725f1db4007ccb2928dbb4e90d06cc86; \
+    # golangci/golangci-lint-action@v9
+    seed golangci/golangci-lint-action ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a; \
     # docker/setup-buildx-action@v4
-    seed docker/setup-buildx-action d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5; \
+    seed docker/setup-buildx-action 37fe631027851001ddb9b187196cc803df7f5f0e; \
     # docker/login-action@v4
-    seed docker/login-action 650006c6eb7dba73a995cc03b0b2d7f5ca915bee; \
+    seed docker/login-action dbcb813823bdd20940b903addbd779551569679f; \
     # docker/metadata-action@v6
-    seed docker/metadata-action 80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9; \
-    # docker/build-push-action@v7
-    seed docker/build-push-action f9f3042f7e2789586610d6e8b85c8f03e5195baf; \
-    # rjstone/discord-webhook-notify@v2
-    seed rjstone/discord-webhook-notify 510c47fe8d6583687298dc08f8d0306957b82a9b; \
-    # actions/checkout@v4 (README workflow conventions, consumer CI jobs)
-    seed actions/checkout 34e114876b0b11c390a56381ad16ebd13914f8d5; \
-    # actions/setup-go@v5
-    seed actions/setup-go 40f1582b2485089dde7abd97c1529aa768e1baff; \
-    # actions/setup-node@v4
-    seed actions/setup-node 49933ea5288caeca8642d1e84afbd3f7d6820020; \
-    # pnpm/action-setup@v4
-    seed pnpm/action-setup b906affcce14559ad1aafd4ab0e942779e9f58b1; \
+    seed docker/metadata-action dc802804100637a589fabce1cb79ff13a1411302; \
+    # crazy-max/ghaction-github-runtime@v4 (also SHA-pinned to this commit in ws-management)
+    seed crazy-max/ghaction-github-runtime 04d248b84655b509d8c44dc1d6f990c879747487; \
+    # actions/delete-package-versions@v5 (Delete-Old-Packages workflow)
+    seed actions/delete-package-versions e5bc658cc4c965c472efe991f8beea3981499c55; \
+    # rjstone/discord-webhook-notify@v2 (v2.3.0; also SHA-pinned in ws-management)
+    seed rjstone/discord-webhook-notify 13eb215cbf853107dd9386c4a2f4035b7988cfc2; \
     chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
 
 # 4) System libraries for Playwright's chromium, so the consumer e2e jobs can
