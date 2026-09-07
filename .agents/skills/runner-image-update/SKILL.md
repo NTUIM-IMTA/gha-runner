@@ -2,7 +2,7 @@
 name: runner-image-update
 description: >-
   Rebuild the self-hosted GitHub Actions runner image with the latest stable Go, Node,
-  pnpm and golangci-lint, refresh the pre-seeded GitHub Actions archive cache to the
+  Python, pnpm and golangci-lint, refresh the pre-seeded GitHub Actions archive cache to the
   commits the consumer workflows resolve to, and roll the new tag out through
   values.yaml + helm. Invoke whenever the user asks to update, bump, rebuild or refresh
   the runner image or its toolchain, mentions setup-go resolving a stale Go patch,
@@ -28,6 +28,8 @@ credentials** — push git commits from a machine with `gh auth`).
 1. 🔴 **Resolve target versions** (commands in `references/commands.md` §1):
    - Go: newest stable on go.dev that also exists in `actions/go-versions`.
    - Node: newest patch of the even (LTS-track) major the consumers pin (`node-version`).
+   - Python: newest patch of the minor the consumers pin (`python-version`; only
+     ws-management's ansible job uses it today).
    - pnpm: `npm view pnpm version`. golangci-lint: latest release, confirm its notes
      mention support for the chosen Go minor before bumping Go.
 2. 🔴 **Resolve every action the consumers use** (§2): collect all `uses:` across the

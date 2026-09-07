@@ -15,6 +15,10 @@ curl -fsSL https://raw.githubusercontent.com/actions/go-versions/main/versions-m
 curl -fsSL https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json \
   | jq -r '[.[] | select(.version|startswith("26."))][0].version'
 
+# Python: newest patch of the minor the consumers pin (3.12 today)
+curl -fsSL https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json \
+  | jq -r '[.[] | select(.version|startswith("3.12."))][0].version'
+
 # pnpm
 npm view pnpm version
 
@@ -64,6 +68,7 @@ nohup docker buildx build go1.27-node26 \
   --platform linux/amd64 \
   --build-arg GO_VERSION=1.27.1 \
   --build-arg NODE_VERSION=26.8.1 \
+  --build-arg PYTHON_VERSION=3.12.14 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.8.1 \
   --push > /tmp/runner-build.log 2>&1 &
@@ -81,7 +86,7 @@ Per repo, the files that carry toolchain versions:
 
 | File | Fields |
 |---|---|
-| `.github/workflows/*.y*ml` | `go-version`, `node-version`, pnpm `version`, golangci-lint `version`, every `uses:` |
+| `.github/workflows/*.y*ml` | `go-version`, `node-version`, `python-version`, pnpm `version`, golangci-lint `version`, every `uses:` |
 | `backend/go.mod` | `go X.Y.Z` |
 | `Dockerfile` (+ `backend/Makefile`, `docker-compose.yml` in print) | `golang:X.Y.Z-alpine*`, `node:A.B.C-alpine`, corepack `pnpm@` |
 | `frontend/package.json`, `e2e/package.json` | `packageManager` |

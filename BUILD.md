@@ -10,7 +10,9 @@ cache) are scripted in the `runner-image-update` skill under `.agents/skills/`;
 this page is the background for what that skill does.
 
 One folder per Go/Node combo lives at the repo root (e.g. `go1.27-node26/`),
-each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` build args.
+each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` /
+`PYTHON_VERSION` build args. (Only Go and Node are in the folder name; Python
+is pinned by one consumer, ws-management's ansible job.)
 
 > **Note:** `go1.27-node26` also bakes in chromium's system libraries
 > (`playwright install-deps`) and qpdf + ghostscript. The consumer e2e jobs
@@ -31,14 +33,16 @@ gh auth token | docker login ghcr.io -u "$GH_USER" --password-stdin
 
 Versions must match the latest patch in
 [actions/go-versions](https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json)
+[actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json)
 and
-[actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json):
+[actions/python-versions](https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json):
 
 ```bash
 docker buildx build go1.27-node26 \
   --platform linux/amd64 \
   --build-arg GO_VERSION=1.27.1 \
   --build-arg NODE_VERSION=26.8.1 \
+  --build-arg PYTHON_VERSION=3.12.14 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.8.1 \
   --push
@@ -51,6 +55,9 @@ with no helm change.
 ## Bumping Go / Node
 
 1. Look up the latest patch in the actions/*-versions manifests linked above.
+   The Python tarball is also per-Ubuntu-release: the Dockerfile picks the file
+   whose `platform_version` matches the base image's `/etc/os-release`, so a
+   base-image OS bump needs no edit here.
 2. Create a new folder `goX.Y-nodeZ/` and copy/edit the `Dockerfile` ARGs.
 3. Build & push with both the floating tag (`goX.Y-nodeZ`) and the immutable
    tag (`goX.Y.Z-nodeA.B.C`) using the command above.

@@ -1,8 +1,8 @@
 # Custom ARC runner image
 # - base: ghcr.io/actions/actions-runner (bare Ubuntu)
 # - adds build-essential so `go test -race` (cgo) works
-# - pre-seeds /opt/hostedtoolcache so actions/setup-go and actions/setup-node
-#   hit "Found in cache" instead of downloading every run
+# - pre-seeds /opt/hostedtoolcache so actions/setup-go, actions/setup-node and
+#   actions/setup-python hit "Found in cache" instead of downloading every run
 # - pre-seeds the action archive cache so "Download action repository" steps
 #   skip the per-job GitHub download (ephemeral pods re-download otherwise)
 FROM ghcr.io/actions/actions-runner:latest
@@ -16,8 +16,10 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 # Check the latest published patch at:
 #   https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
+#   https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
 ARG GO_VERSION=1.27.1
 ARG NODE_VERSION=26.8.1
+ARG PYTHON_VERSION=3.12.14
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
 # Point it at the persistent toolcache we pre-seed below so setup-go /
@@ -69,7 +71,8 @@ RUN set -eux; \
       -o /usr/local/bin/yq; \
     chmod +x /usr/local/bin/yq
 
-# 2) Pre-seed toolcache using the exact tarballs setup-go / setup-node download.
+# 2) Pre-seed toolcache using the exact tarballs setup-go / setup-node /
+#    setup-python download.
 #    Cluster is linux/amd64; the GitHub toolcache arch label for x86_64 is "x64".
 RUN set -eux; \
     # Go
@@ -90,6 +93,20 @@ RUN set -eux; \
     curl -fsSL "$NODE_URL" \
       | tar -xz -C "/opt/hostedtoolcache/node/${NODE_VERSION}/x64" --strip-components=1; \
     touch "/opt/hostedtoolcache/node/${NODE_VERSION}/x64.complete"; \
+    # Python. Unlike Go/Node, setup-python picks the file whose platform_version
+    # matches the runner's Ubuntu release and then runs the tarball's own
+    # setup.sh; do both here so the cached layout (symlinks, upgraded pip,
+    # x64.complete) is byte-for-byte what setup-python would have produced.
+    . /etc/os-release; \
+    PY_URL="$(curl -fsSL https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json \
+      | jq -r --arg v "$PYTHON_VERSION" --arg os "$VERSION_ID" '.[] | select(.version==$v) | .files[] | select(.platform=="linux" and .platform_version==$os and .arch=="x64") | .download_url' \
+      | head -n1)"; \
+    test -n "$PY_URL"; \
+    mkdir -p /tmp/python-installer; \
+    curl -fsSL "$PY_URL" | tar -xz -C /tmp/python-installer; \
+    (cd /tmp/python-installer && RUNNER_TOOL_CACHE=/opt/hostedtoolcache bash ./setup.sh); \
+    rm -rf /tmp/python-installer /root/.cache/pip; \
+    test -f "/opt/hostedtoolcache/Python/${PYTHON_VERSION}/x64.complete"; \
     chown -R runner:runner /opt/hostedtoolcache
 
 # 3) Pre-seed the action archive cache with the actions our workflows pin.
