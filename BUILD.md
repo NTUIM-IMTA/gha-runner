@@ -41,10 +41,10 @@ and
 docker buildx build go1.27-node26 \
   --platform linux/amd64 \
   --build-arg GO_VERSION=1.27.1 \
-  --build-arg NODE_VERSION=26.8.1 \
-  --build-arg PYTHON_VERSION=3.12.14 \
+  --build-arg NODE_VERSION=26.10.0 \
+  --build-arg PYTHON_VERSION=3.12.15 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.8.1 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 \
   --push
 ```
 

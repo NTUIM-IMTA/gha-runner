@@ -18,8 +18,8 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
 ARG GO_VERSION=1.27.1
-ARG NODE_VERSION=26.8.1
-ARG PYTHON_VERSION=3.12.14
+ARG NODE_VERSION=26.10.0
+ARG PYTHON_VERSION=3.12.15
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
 # Point it at the persistent toolcache we pre-seed below so setup-go /
@@ -140,7 +140,7 @@ RUN set -eux; \
     # golangci/golangci-lint-action@v9
     seed golangci/golangci-lint-action ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a; \
     # docker/setup-buildx-action@v4
-    seed docker/setup-buildx-action 37fe631027851001ddb9b187196cc803df7f5f0e; \
+    seed docker/setup-buildx-action f87e5991a6d7451dcb8d9637bfbc97413f497069; \
     # docker/login-action@v4
     seed docker/login-action dbcb813823bdd20940b903addbd779551569679f; \
     # docker/metadata-action@v6
