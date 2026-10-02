@@ -91,3 +91,20 @@ so re-pushing the same tag goes live on the next pod restart. To bump: update th
 plugin version) in `verdaccio/Dockerfile`, then rebuild with the command above.
 Look up the current digest with
 `docker buildx imagetools inspect verdaccio/verdaccio:7.x-next`.
+
+On the build host `docker` is a podman shim without buildx; build there with
+podman, keep the previous image under a rollback tag, then restart the pod:
+
+```bash
+podman pull ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
+podman tag ghcr.io/ntuim-imta/verdaccio-s3:7.x-next ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<old>
+podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<old>
+podman build --pull=always --platform linux/amd64 \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<new> verdaccio
+podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<new>
+podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
+kubectl -n verdaccio rollout restart deploy/verdaccio
+```
+
+Rollback tags on GHCR: `7.x-next-s3plugin12.1.1` (pre-fix), `7.x-next-s3plugin12.1.2` (current).

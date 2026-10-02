@@ -12,17 +12,21 @@
 
 # 1) Vendor the plugin and its full dependency tree (flattened into node_modules
 #    by --install-strategy=shallow).
+#    >= 12.1.2: earlier 12.x re-throws an aborted tarball upload (writeTarball)
+#    as an unhandled rejection, which crashes the whole Verdaccio process when
+#    several CI jobs fetch new tarballs at once ("fatal--- uncaught exception
+#    ... Upload aborted", exit 255, crash loop).
 FROM node:lts-alpine AS builder
 RUN mkdir -p /verdaccio/plugins \
  && cd /verdaccio/plugins \
  && npm install --install-strategy=shallow --no-bin-links --omit=optional \
-      verdaccio-aws-s3-storage@^12
+      verdaccio-aws-s3-storage@^12.1.2
 
 # 2) Bake it into Verdaccio. The plugin loader looks under /verdaccio/plugins
 #    (the default `plugins` dir) for a folder named verdaccio-<store-key>, so the
 #    plugin must sit there directly. Its dependencies (@aws-sdk/*, …) ride along
 #    as a sibling node_modules so the plugin's require() calls resolve.
-FROM verdaccio/verdaccio:7.x-next@sha256:7b930e8232214860a469355498fc3c4976d2bd11292035d664e940a021d6faeb
+FROM docker.io/verdaccio/verdaccio:7.x-next@sha256:7b930e8232214860a469355498fc3c4976d2bd11292035d664e940a021d6faeb
 # Links the GHCR package to this repo (same convention as the runner image).
 LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 COPY --chown=10001:root --from=builder \
