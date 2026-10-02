@@ -15,8 +15,14 @@ data:
       [ -z "$tags" ] && continue
       for tag in $tags; do
         created=$(regctl image config "$REG/$repo:$tag" --format '{{.Created}}' 2>/dev/null || echo "")
+        # Skip tags whose config can't be read: with no timestamp they would
+        # sort as the oldest and be deleted on a transient error.
+        [ -z "$created" ] && continue
         printf '%s\t%s\n' "$created" "$tag"
-      done | sort -r | awk -v k="$KEEP" 'NR>k {print $2}' | while read -r old; do
+      # Split on the tab only: the timestamp itself contains spaces
+      # ("2026-07-02 09:10:48.28 +0000 UTC"), so awk's default field
+      # splitting made $2 the clock time and every `tag rm` failed.
+      done | sort -r | awk -F '\t' -v k="$KEEP" 'NR>k {print $2}' | while read -r old; do
         echo "deleting $repo:$old"
         regctl tag rm "$REG/$repo:$old" || true
       done
