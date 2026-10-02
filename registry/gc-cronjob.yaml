@@ -40,21 +40,21 @@ spec:
           restartPolicy: Never
           initContainers:
             - name: retention
-              image: ghcr.io/regclient/regctl:v0.8.0-alpine
+              image: ghcr.io/regclient/regctl:v0.11.6-alpine
               command: ["/bin/sh", "/scripts/retention.sh"]
               volumeMounts:
                 - name: script
                   mountPath: /scripts
           containers:
             - name: gc
-              image: registry:2
+              image: registry:3
               command:
                 - /bin/sh
                 - -c
                 - |
                   mkdir -p /var/lib/registry/docker/registry/v2/repositories
                   mkdir -p /var/lib/registry/docker/registry/v2/blobs
-                  /bin/registry garbage-collect -m --delete-untagged=true /etc/docker/registry/config.yml
+                  /bin/registry garbage-collect -m --delete-untagged=true /etc/distribution/config.yml
               volumeMounts:
                 - name: data
                   mountPath: /var/lib/registry

@@ -19,7 +19,7 @@ maxRunners: 8
 ## images (integration/e2e service containers: postgres, redis, …) through the
 ## in-cluster pull-through cache (dockerhub-mirror/). So this template is a
 ## verbatim copy of what `helm template` renders for containerMode dind on
-## chart 0.14.2, plus the marked deltas. When bumping the chart version,
+## chart 0.15.0 (identical to 0.14.2), plus the marked deltas. When bumping the chart version,
 ## re-render with `containerMode: {type: dind}` and re-diff this block.
 template:
   spec:

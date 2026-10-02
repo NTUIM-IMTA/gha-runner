@@ -72,7 +72,7 @@ helm version
 ```bash
 helm install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-  --version 0.14.2 \
+  --version 0.15.0 \
   -n arc-systems --create-namespace
 ```
 
@@ -146,7 +146,7 @@ the setup simple and needs no group to be pre-created in GitHub.
 ```bash
 helm install my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.14.2 \
+  --version 0.15.0 \
   -n arc-runners \
   --set githubConfigUrl=https://github.com/NTUIM-IMTA \
   --set githubConfigSecret=gh-config \
@@ -190,7 +190,7 @@ All knobs live in `values.yaml`. After editing:
 ```bash
 helm upgrade my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.14.2 \
+  --version 0.15.0 \
   -n arc-runners \
   --reuse-values \
   -f values.yaml
@@ -217,7 +217,7 @@ Watch `kubectl top node` while runs queue; bump down on memory pressure.
 dind sidecar accepts no extra dockerd flags, and we pass `--registry-mirror`
 (see [Docker Hub mirror](#docker-hub-mirror--playwright-cdn-cache)). Instead,
 the pod template is an explicit verbatim copy of what the chart would render
-for containerMode dind on 0.14.2, plus the `[delta]`-marked additions.
+for containerMode dind on 0.15.0, plus the `[delta]`-marked additions.
 
 Removing the dind block entirely disables `docker/setup-buildx-action`, any
 `docker build`, and every `services:` block in consumer workflows ("cannot
@@ -288,7 +288,7 @@ downloads repeat on every single run:
 
 | What | Cached by | Wired up via |
 |---|---|---|
-| `services:` images (postgres, redis, …) | `dockerhub-mirror/` — registry:2 pull-through cache | dind `--registry-mirror` flag in `values.yaml` |
+| `services:` images (postgres, redis, …) | `dockerhub-mirror/` — registry:3 pull-through cache | dind `--registry-mirror` flag in `values.yaml` |
 | `playwright install chromium` (~170 MB) | `playwright-cache/` — nginx `proxy_cache` in front of `cdn.playwright.dev` | `PLAYWRIGHT_DOWNLOAD_HOST` env in `values.yaml` |
 | chromium system libs / qpdf + ghostscript | baked into the runner image ([BUILD.md](BUILD.md)) | e2e jobs pass `--with-deps` only on the `gha` target |
 
@@ -385,7 +385,7 @@ the image registry.
 
 manifest：
 
-- `registry/registry.yaml` — Namespace、PVC（20Gi，`local-path`）、`registry:2`
+- `registry/registry.yaml` — Namespace、PVC（20Gi，`local-path`）、`registry:3`
   Deployment（已開啟 `REGISTRY_STORAGE_DELETE_ENABLED`）、`LoadBalancer:5000`
   （k3s ServiceLB 綁 node IP）。
 - `registry/gc-cronjob.yaml` — 每日 04:00 的 GC CronJob：每個 repo 保留最新 5 個
@@ -432,11 +432,33 @@ registry 的清理則由上述 GC CronJob 處理。
 ## Update / uninstall
 
 ```bash
-# Upgrade chart version
-helm upgrade my-runners \
+# Upgrade ARC (controller + scale set). Helm never upgrades CRDs, so follow
+# GitHub's documented path: uninstall both, drop the actions.github.com CRDs,
+# reinstall. Do it while no jobs are queued/running (runners are gone meanwhile).
+# First re-render the dind template for <new-version> and re-diff values.yaml
+# (see "When bumping the chart version" above).
+mkdir -p ~/arc-backup && helm get values my-runners -n arc-runners -o yaml > ~/arc-backup/my-runners-values.yaml
+helm uninstall my-runners -n arc-runners --wait
+kubectl get autoscalingrunnerset,ephemeralrunnerset,ephemeralrunner,autoscalinglistener -A   # wait until empty
+helm uninstall arc -n arc-systems --wait
+kubectl get crd -o name | grep actions.github.com | xargs kubectl delete
+helm install arc \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --version <new-version> -n arc-systems --wait
+helm install my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version <new-version> \
-  -n arc-runners --reuse-values -f values.yaml
+  --version <new-version> -n arc-runners \
+  --set githubConfigUrl=https://github.com/NTUIM-IMTA --set githubConfigSecret=gh-config \
+  -f values.yaml --wait
+
+# Bump an in-cluster mirror image: apply only the workload objects. The PVC
+# specs here are immutable once bound (and local-path cannot resize), so a
+# whole-file `kubectl apply` fails on them.
+python3 - athens/athens.yaml <<'EOF' | kubectl apply -f -
+import re, sys
+docs = re.split(r"(?m)^---\s*$", open(sys.argv[1]).read())
+print("\n---\n".join(d for d in docs if re.search(r"(?m)^kind:\s*(Deployment|CronJob)\s*$", d)))
+EOF
 
 # Tear down
 helm uninstall my-runners -n arc-runners

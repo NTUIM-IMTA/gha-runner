@@ -34,10 +34,13 @@ spec:
     spec:
       containers:
         - name: registry
-          image: registry:2
+          image: registry:3
           ports:
             - containerPort: 5000
           env:
+            ## registry:3's bundled config defaults to log level debug (v2: info).
+            - name: REGISTRY_LOG_LEVEL
+              value: info
             - name: REGISTRY_HTTP_ADDR
               value: ":5000"
             - name: REGISTRY_STORAGE_DELETE_ENABLED

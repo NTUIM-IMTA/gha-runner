@@ -56,7 +56,7 @@ spec:
     spec:
       containers:
         - name: athens
-          image: gomods/athens:v0.17.1
+          image: gomods/athens:v0.19.2
           ports:
             - containerPort: 3000
               name: http

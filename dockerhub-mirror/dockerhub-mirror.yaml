@@ -1,4 +1,4 @@
-# In-cluster Docker Hub pull-through cache (registry:2 in proxy mode)
+# In-cluster Docker Hub pull-through cache (registry:3 in proxy mode)
 #
 # Apply: kubectl apply -f dockerhub-mirror/dockerhub-mirror.yaml
 # Runners use it via the dind sidecar's --registry-mirror flag (values.yaml).
@@ -55,11 +55,14 @@ spec:
     spec:
       containers:
         - name: registry
-          image: registry:2
+          image: registry:3
           ports:
             - containerPort: 5000
               name: http
           env:
+            ## registry:3's bundled config defaults to log level debug (v2: info).
+            - name: REGISTRY_LOG_LEVEL
+              value: info
             - name: REGISTRY_HTTP_ADDR
               value: ":5000"
             ## Proxy mode: serve from cache, fetch misses from Docker Hub.

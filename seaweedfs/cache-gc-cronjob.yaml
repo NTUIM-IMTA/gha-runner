@@ -83,7 +83,7 @@ spec:
           restartPolicy: Never
           initContainers:
             - name: evict
-              image: rclone/rclone:1.74
+              image: rclone/rclone:1.75
               command: ["/bin/sh", "/scripts/evict.sh"]
               env:
                 - name: RCLONE_CONFIG_SW_TYPE
@@ -109,7 +109,7 @@ spec:
                   mountPath: /scripts
           containers:
             - name: vacuum
-              image: busybox:1.37
+              image: busybox:1.38
               command:
                 - /bin/sh
                 - -c
