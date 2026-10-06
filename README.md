@@ -47,6 +47,8 @@ cd ~/gha-runner
 
 ### 1. k3s
 
+**New standalone host (with or without a local registry):**
+
 ```bash
 curl -sfL https://get.k3s.io | sh - && sudo chmod 644 /etc/rancher/k3s/k3s.yaml
 mkdir -p ~/.kube
@@ -56,6 +58,34 @@ echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
 source ~/.bashrc
 kubectl get nodes
 ```
+
+**Additional worker in an existing cluster:** use the
+[K3s agent installation](https://docs.k3s.io/quick-start) instead of the block
+above. Obtain the token on the existing server:
+
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+k3s --version
+```
+
+On the new worker, use that token, server IP, and K3s version:
+
+```bash
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION='<server-k3s-version>' \
+  K3S_URL='https://<server-IP>:6443' \
+  K3S_TOKEN='<node-token>' \
+  sh -
+```
+
+Skip steps 2–6 when ARC and the runner scale set already exist in that cluster;
+use the existing cluster's kubeconfig for step 7. Runners share the cluster's
+cache services and `values.yaml`.
+
+Joining as an agent does not reserve the node for runners. The current registry
+Deployment has no `nodeSelector`; use node labels and scheduling rules to keep
+registry/cache workloads off the worker. Restrict K3s ServiceLB placement too if
+port 5000 should only be exposed on the registry host.
 
 ### 2. helm
 
@@ -95,8 +125,10 @@ kubectl -n arc-runners create secret generic gh-config \
 Both custom images (`gha-runner`, `verdaccio-s3`) are **public** on GHCR, so no
 pull secret or `docker login` is needed on the cluster.
 
-Apply the mirrors and the registry — SeaweedFS first, since Athens and Verdaccio
-crash-loop until the S3 endpoint is up:
+Apply the cache services — SeaweedFS first, since Athens and Verdaccio
+crash-loop until the S3 endpoint is up. A standalone worker can keep these
+caches without hosting the image registry. To omit all caches too, skip this
+step and use the values changes in step 6:
 
 ```bash
 kubectl apply -f seaweedfs/seaweedfs.yaml
@@ -106,12 +138,17 @@ kubectl apply -f athens/athens.yaml
 kubectl apply -f verdaccio/verdaccio.yaml
 kubectl apply -f dockerhub-mirror/dockerhub-mirror.yaml
 kubectl apply -f playwright-cache/playwright-cache.yaml
-kubectl apply -f registry/registry.yaml
-kubectl apply -f registry/gc-cronjob.yaml
 kubectl -n athens rollout status deploy/athens
 kubectl -n verdaccio rollout status deploy/verdaccio
 kubectl -n dockerhub-mirror rollout status deploy/dockerhub-mirror
 kubectl -n playwright-cache rollout status deploy/playwright-cache
+```
+
+**Registry host only — skip this block on a standalone worker:**
+
+```bash
+kubectl apply -f registry/registry.yaml
+kubectl apply -f registry/gc-cronjob.yaml
 kubectl -n registry rollout status deploy/registry
 ```
 
@@ -139,6 +176,22 @@ and `PLAYWRIGHT_DOWNLOAD_HOST` — the chart picks up the rest from the
 controller install. The image it pins is prebuilt and public on GHCR; rebuilding it is a
 one-time task — see [Appendix: Building the runner image](BUILD.md).
 
+**Standalone worker without cache services:** copy `values.yaml` to
+`values-worker.yaml` and make these changes before running the install below:
+
+| Setting | Change |
+| --- | --- |
+| dind `--registry-mirror` and `--insecure-registry` arguments | Remove both |
+| `GOPROXY` | Set to `https://proxy.golang.org,direct` |
+| `NPM_CONFIG_REGISTRY` | Set to `https://registry.npmjs.org/` |
+| `PLAYWRIGHT_DOWNLOAD_HOST` | Remove |
+
+Use `-f values-worker.yaml` instead of `-f values.yaml` in the install block
+and later Helm upgrades. Cache DNS names from another cluster will not work.
+The runner image is pulled directly from GHCR; no local build is required.
+Workflows that push application images to the local registry still need an
+existing registry or a different push destination configured in the consumer repo.
+
 Runners register into the org's **`Default`** runner group (no `runnerGroup`
 override). A named custom group also works on this cluster, but Default keeps
 the setup simple and needs no group to be pre-created in GitHub.
@@ -158,6 +211,9 @@ helm install my-runners \
 ```bash
 kubectl -n arc-systems get pods
 kubectl -n arc-runners get autoscalingrunnerset my-runners
+# Also check node readiness and runner placement when adding a worker.
+kubectl get nodes -o wide
+kubectl -n arc-runners get pods -o wide
 ```
 
 In any consumer repo's workflow, set `runs-on: my-runners`.
@@ -393,6 +449,11 @@ manifest：
 
 ### node 一次性設定
 
+**Registry 主機**需設定下面的 DNS 與對外 port 5000。
+**只當 worker** 可略過這兩項；若工作負載仍要從既有 HTTP registry 拉 image，
+仍需在 worker 套用下面的 `registries.yaml`。這是 containerd 的拉取設定，
+不會設定 runner 的 dind daemon；只拉公開 GHCR image 時不需要此設定。
+
 1. 將 DNS `registry.imta.im.ntu.edu.tw` 指向 node 的 IP。
 2. 讓 containerd 以 HTTP 拉取此 registry —— 編輯 `/etc/rancher/k3s/registries.yaml`：
 
@@ -405,7 +466,8 @@ mirrors:
 
    containerd 預設對 registry 走 HTTPS；若不指定，部署拉取會出現
    `http: server gave HTTP response to HTTPS client`。
-3. `sudo systemctl restart k3s` 套用。
+3. 獨立 k3s 主機用 `sudo systemctl restart k3s` 套用；加入既有叢集的 worker
+   則用 `sudo systemctl restart k3s-agent`。
 4. 對外的 5000 埠請在 PVE 防火牆限制到信任來源 —— 此 registry 無 TLS、無認證，
    防火牆是唯一防線。
 
