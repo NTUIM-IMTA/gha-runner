@@ -75,6 +75,15 @@ spec:
               value: 168h
             - name: REGISTRY_STORAGE_DELETE_ENABLED
               value: "true"
+            ## Disable the bundled config's inmemory blob descriptor cache
+            ## (the registry logs "unknown cache type ..., caching disabled").
+            ## When a blob shared by two repos expires, the scheduler deletes
+            ## the blob data but only the expiring repo's link; with the cache
+            ## on, the other repo keeps answering 200 with 0 bytes ("short
+            ## read ... got 0") until a restart. Without it, the dangling link
+            ## misses on stat and the blob is re-fetched from Docker Hub.
+            - name: REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR
+              value: ""
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
