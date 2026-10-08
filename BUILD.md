@@ -72,9 +72,9 @@ Verdaccio's storage backend is the in-cluster SeaweedFS S3 store (see
 plugin is **not** in the stock image, so `verdaccio/Dockerfile` bakes it into a
 custom image. Rebuild this only when bumping the Verdaccio or plugin version.
 
-The plugin requires Verdaccio >= 7, which at the time of writing only ships as a
-beta — published on Docker Hub under the rolling `7.x-next` tag (no per-beta
-tag), so the Dockerfile pins it by digest.
+The plugin requires Verdaccio >= 7. Docker Hub publishes individual beta tags
+as well as the rolling `7.x-next` tag. The Dockerfile pins the chosen beta by
+both its version tag and digest.
 
 ```bash
 # Log in to GHCR first (see step 1 above).
@@ -82,29 +82,29 @@ docker buildx build verdaccio \
   --platform linux/amd64 \
   --provenance=false \
   -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2 \
   --push
 ```
 
 The package is public on GHCR, so the cluster pulls it without a secret. The
 manifest (`verdaccio/verdaccio.yaml`) pins this tag with `imagePullPolicy: Always`,
-so re-pushing the same tag goes live on the next pod restart. To bump: update the pinned `7.x-next@sha256:…` base digest (and/or
-plugin version) in `verdaccio/Dockerfile`, then rebuild with the command above.
-Look up the current digest with
+so re-pushing the same tag goes live on the next pod restart. To bump: update
+the pinned base tag + digest (and/or plugin version) in `verdaccio/Dockerfile`,
+then rebuild with the command above. Look up the current digest with
 `docker buildx imagetools inspect verdaccio/verdaccio:7.x-next`.
 
-On the build host `docker` is a podman shim without buildx; build there with
-podman, keep the previous image under a rollback tag, then restart the pod:
+On the build host `docker` is a podman shim without buildx. The existing
+immutable `7.x-next-s3plugin12.1.2` tag keeps the pre-update image; build and
+push the new versioned tag plus the floating tag, then restart the pod:
 
 ```bash
-podman pull ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
-podman tag ghcr.io/ntuim-imta/verdaccio-s3:7.x-next ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<old>
-podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<old>
 podman build --pull=always --platform linux/amd64 \
   -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
-  -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<new> verdaccio
-podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next-s3plugin<new>
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2 verdaccio
+podman push ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2
 podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
 kubectl -n verdaccio rollout restart deploy/verdaccio
 ```
 
-Rollback tags on GHCR: `7.x-next-s3plugin12.1.1` (pre-fix), `7.x-next-s3plugin12.1.2` (current).
+Rollback tags on GHCR: `7.x-next-s3plugin12.1.1` (pre-fix),
+`7.x-next-s3plugin12.1.2` (pre-Verdaccio 7.0.0-next-7.30 image).
