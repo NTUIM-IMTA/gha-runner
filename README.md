@@ -220,6 +220,21 @@ In any consumer repo's workflow, set `runs-on: my-runners`.
 
 ## Workflow conventions
 
+### 手動清理本 repo 的 GHCR images
+
+在 Actions → **Clean up GHCR images** → **Run workflow** 手動觸發
+`.github/workflows/cleanup-images.yml`（`workflow_dispatch`）。它會分別清理
+`gha-runner` 和 `verdaccio-s3`，依 `updated_at` 保留最新的已標記 image 版本
+及其所有 tags、平台 manifests 與 build attestations，刪除其餘版本（包含未標記版本）。
+沒有已標記版本時會跳過；此流程不清理本地 registry。
+
+兩個 GHCR package 的 **Package settings → Manage Actions access** 必須授予
+本 repo **Admin** 權限，workflow 才能使用 `GITHUB_TOKEN` 刪除版本；
+見 [GitHub 的 package 刪除權限說明](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package)。
+清理時請避免同時推送 image；舊 tag 被刪除後，引用該 tag 的部署將無法重新拉取。
+
+### Consumer workflows
+
 ```yaml
 jobs:
   test:

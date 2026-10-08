@@ -1,0 +1,78 @@
+name: Clean up GHCR images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+concurrency:
+  group: cleanup-ghcr-images
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [gha-runner, verdaccio-s3]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      PACKAGE: ${{ matrix.package }}
+    steps:
+      - name: Keep the newest tagged image and its referenced manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="/orgs/$OWNER/packages/container/$PACKAGE/versions"
+          versions=$(gh api --paginate --slurp "$endpoint?per_page=100" | jq 'add')
+          latest=$(jq -c '[.[] | select(.metadata.container.tags | length > 0)] | sort_by(.updated_at, .created_at, .id) | last' <<< "$versions")
+          if [[ "$latest" == null ]]; then
+            echo "No tagged version for $PACKAGE; skipping cleanup."
+            exit 0
+          fi
+
+          # Untagged platform images and build attestations can belong to an index.
+          # Traverse its references before deleting any package versions.
+          image="${OWNER,,}/$PACKAGE"
+          token=$(curl --fail --silent --show-error --get \
+            --user "$GITHUB_ACTOR:$GH_TOKEN" \
+            --data-urlencode 'service=ghcr.io' \
+            --data-urlencode "scope=repository:$image:pull" \
+            https://ghcr.io/token | jq -er '.token')
+          echo "::add-mask::$token"
+          pending=("$(jq -r '.name' <<< "$latest")")
+          declare -A keep=()
+          while ((${#pending[@]})); do
+            digest="${pending[0]}"
+            pending=("${pending[@]:1}")
+            if [[ -n "${keep[$digest]:-}" ]]; then
+              continue
+            fi
+            keep["$digest"]=1
+            manifest=$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$image/manifests/$digest")
+            references=$(jq -er '[.manifests[]?.digest] | .[] // empty' <<< "$manifest") || {
+              # An image manifest has no child manifests; malformed JSON must fail.
+              jq -e '.schemaVersion == 2 and (.config != null or .manifests != null)' <<< "$manifest" > /dev/null
+              references=''
+            }
+            while IFS= read -r child; do
+              [[ -z "$child" ]] || pending+=("$child")
+            done <<< "$references"
+          done
+
+          echo "Keeping $PACKAGE: $(jq -r '.metadata.container.tags | join(", ")' <<< "$latest")"
+          while IFS=$'\t' read -r id digest; do
+            if [[ -n "${keep[$digest]:-}" ]]; then
+              echo "Keep $id ($digest)"
+            else
+              echo "Delete $id ($digest)"
+              gh api --method DELETE "$endpoint/$id"
+            fi
+          done < <(jq -r '.[] | [.id, .name] | @tsv' <<< "$versions")
