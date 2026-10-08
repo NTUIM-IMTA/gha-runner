@@ -176,6 +176,20 @@ and `PLAYWRIGHT_DOWNLOAD_HOST` — the chart picks up the rest from the
 controller install. The image it pins is prebuilt and public on GHCR; rebuilding it is a
 one-time task — see [Appendix: Building the runner image](BUILD.md).
 
+Current repo configuration (versions from `values.yaml` and the runner Dockerfile):
+
+| Component | Version / image |
+| --- | --- |
+| ARC controller and runner scale set charts | `0.15.0` |
+| Runner image | `ghcr.io/ntuim-imta/gha-runner:go1.27-node26` |
+| Go toolcache | `1.27.1` |
+| Node.js toolcache | `26.10.0` |
+| Python toolcache | `3.14.8` |
+
+The runner image tag is floating; `imagePullPolicy: Always` checks it for each
+new runner pod. These versions describe the repo configuration, not a check for
+the newest upstream releases.
+
 **Standalone worker without cache services:** copy `values.yaml` to
 `values-worker.yaml` and make these changes before running the install below:
 
@@ -195,6 +209,46 @@ existing registry or a different push destination configured in the consumer rep
 Runners register into the org's **`Default`** runner group (no `runnerGroup`
 override). A named custom group also works on this cluster, but Default keeps
 the setup simple and needs no group to be pre-created in GitHub.
+
+**Two independent clusters sharing `runs-on: my-runners`:** keep the same scale
+set name but use a different runner group in each cluster. The first can use
+`Default`; create `workers-2` in the organization's **Settings → Actions → Runner
+groups** and allow the consumer repos before installing the second cluster.
+In the install block below, add `--set runnerGroup=workers-2` and
+`--set runnerScaleSetName=my-runners` on the second cluster. The shared workflow
+does not need to specify a group. GitHub distributes jobs arbitrarily between
+eligible scale sets; it does not guarantee equal load.
+See [GitHub's multi-cluster setup](https://docs.github.com/en/actions/how-tos/manage-runners/use-actions-runner-controller/deploy-runner-scale-sets#high-availability-and-automatic-failover).
+
+For an existing second installation, first compare the `runner-scale-set-id`
+annotation on both clusters:
+
+```bash
+kubectl -n arc-runners get autoscalingrunnerset my-runners \
+  -o jsonpath='{.metadata.annotations}{"\n"}'
+```
+
+If both installations reference the same GitHub ID, resolve that shared
+registration before changing groups or uninstalling either installation; those
+operations can affect the other cluster. If the second installation has no ID
+yet, or has its own distinct ID, apply its group configuration:
+
+```bash
+# Run only against the second cluster, after creating workers-2 in GitHub.
+helm upgrade my-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --version 0.15.0 \
+  -n arc-runners \
+  --reuse-values \
+  --set runnerGroup=workers-2 \
+  --set runnerScaleSetName=my-runners
+```
+
+If registration stays Pending, check the ARC controller logs. A registration-token
+`403 Forbidden` indicates the credentials lack access; use an org admin's
+classic PAT with the scopes in step 4, or appropriately authorized credentials.
+`no runner group found` means ARC cannot find the configured group with those
+credentials; verify the group exists and the token can access it.
 
 ```bash
 helm install my-runners \
@@ -240,15 +294,15 @@ jobs:
   test:
     runs-on: my-runners
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.26"   # matches a folder name in this repo
+          go-version: "1.27.1" # matches the pre-seeded runner toolcache
           cache: false         # GOPROXY routes through Athens instead
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: "26.10.0" # matches the pre-seeded runner toolcache
           cache: false         # NPM_CONFIG_REGISTRY routes through Verdaccio
       - run: cd backend && go test -race -cover ./...
       - run: cd frontend && pnpm install --frozen-lockfile
@@ -432,8 +486,9 @@ the image registry.
 
 > **Caveats / migration.**
 > - **Verdaccio needs Verdaccio >= 7**, which currently only ships as a beta
->   (Docker tag `7.x-next`, pinned by digest). Build/push the custom image
->   before applying ([BUILD.md](BUILD.md)); a critical mirror runs on a beta here.
+>   (Docker Hub now tags each beta; the custom image tracks `7.0.0-next-7.30`,
+>   pinned by digest). Build/push the custom image before applying
+>   ([BUILD.md](BUILD.md)); a critical mirror runs on a beta here.
 > - **Verify Athens' `source.zip` path** after cutover: it uses minio-go's
 >   `ComposeObject` (server-side multipart copy), the classic S3-compat edge
 >   case. Smoke-test with a large module (e.g. force a fresh `pdfcpu` fetch) and
