@@ -15,9 +15,9 @@ curl -fsSL https://raw.githubusercontent.com/actions/go-versions/main/versions-m
 curl -fsSL https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json \
   | jq -r '[.[] | select(.version|startswith("26."))][0].version'
 
-# Python: newest patch of the minor the consumers pin (3.12 today)
+# Python: newest patch of the minor the consumer pins (3.14 after this update)
 curl -fsSL https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json \
-  | jq -r '[.[] | select(.version|startswith("3.12."))][0].version'
+  | jq -r '[.[] | select(.version|startswith("3.14."))][0].version'
 
 # pnpm
 npm view pnpm version
@@ -60,15 +60,16 @@ update both the SHA and the comment there.
 ## §3 Build and push on the build host
 
 ```bash
-ssh imta@10.1.106.110
+ssh -J imta@140.112.106.11 imta@10.1.106.110
 cd ~/gha-runner && git fetch origin && git status   # must be clean and at origin/main
-# apply the Dockerfile / values / docs edits (or push them to main first and pull)
+# After pushing the local main commit, fast-forward the build-host clone:
+git pull --ff-only origin main
 
 nohup docker buildx build go1.27-node26 \
   --platform linux/amd64 \
   --build-arg GO_VERSION=1.27.1 \
   --build-arg NODE_VERSION=26.10.0 \
-  --build-arg PYTHON_VERSION=3.12.15 \
+  --build-arg PYTHON_VERSION=3.14.8 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 \
   --push > /tmp/runner-build.log 2>&1 &
@@ -86,7 +87,7 @@ and push with podman instead — it is already logged in to GHCR:
 
 ```bash
 nohup zsh -lc "podman build --pull=always --platform linux/amd64 \
-  --build-arg GO_VERSION=1.27.1 --build-arg NODE_VERSION=26.10.0 --build-arg PYTHON_VERSION=3.12.15 \
+  --build-arg GO_VERSION=1.27.1 --build-arg NODE_VERSION=26.10.0 --build-arg PYTHON_VERSION=3.14.8 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 go1.27-node26 \
   && podman push ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 \

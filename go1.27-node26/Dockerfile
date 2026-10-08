@@ -19,7 +19,7 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 #   https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
 ARG GO_VERSION=1.27.1
 ARG NODE_VERSION=26.10.0
-ARG PYTHON_VERSION=3.12.15
+ARG PYTHON_VERSION=3.14.8
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
 # Point it at the persistent toolcache we pre-seed below so setup-go /
@@ -130,9 +130,9 @@ RUN set -eux; \
     # actions/setup-go@v7
     seed actions/setup-go b7ad1dad31e06c5925ef5d2fc7ad053ef454303e; \
     # actions/setup-node@v7
-    seed actions/setup-node 820762786026740c76f36085b0efc47a31fe5020; \
+    seed actions/setup-node 949feb2413d6458794dcd2491c4babbbce0c15c1; \
     # actions/upload-artifact@v7
-    seed actions/upload-artifact 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a; \
+    seed actions/upload-artifact cf430e030ddbb5b0abf93d22962f4752f3646cd9; \
     # actions/setup-python@v7
     seed actions/setup-python 5fda3b95a4ea91299a34e894583c3862153e4b97; \
     # pnpm/action-setup@v6
