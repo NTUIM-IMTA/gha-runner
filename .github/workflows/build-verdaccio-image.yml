@@ -13,7 +13,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: build-verdaccio-s3-image
+  group: ghcr-image-maintenance
   cancel-in-progress: false
 
 jobs:

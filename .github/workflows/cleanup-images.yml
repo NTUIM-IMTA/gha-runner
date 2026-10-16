@@ -7,7 +7,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: cleanup-ghcr-images
+  group: ghcr-image-maintenance
   cancel-in-progress: false
 
 jobs:

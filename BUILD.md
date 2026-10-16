@@ -13,7 +13,9 @@ The runner and Verdaccio S3 images also have separate GitHub Actions workflows.
 They build and push on `main` when their corresponding Dockerfile or workflow
 changes, and can be started manually from the Actions tab. The runner workflow
 publishes both the floating toolchain tag and the immutable patch tag. The
-Verdaccio workflow publishes its rolling and versioned tags.
+Verdaccio workflow publishes its rolling and versioned tags. Both builds share
+a concurrency group with the GHCR cleanup workflow so cleanup cannot inspect a
+package while an image is being pushed.
 
 One folder per Go/Node combo lives at the repo root (e.g. `go1.27-node26/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` /
