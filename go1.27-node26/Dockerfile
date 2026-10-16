@@ -17,7 +17,7 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 #   https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
-ARG GO_VERSION=1.27.1
+ARG GO_VERSION=1.27.2
 ARG NODE_VERSION=26.10.0
 ARG PYTHON_VERSION=3.14.8
 
