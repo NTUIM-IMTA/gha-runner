@@ -73,6 +73,13 @@ jobs:
               echo "Keep $id ($digest)"
             else
               echo "Delete $id ($digest)"
-              gh api --method DELETE "$endpoint/$id"
+              if ! delete_error=$(gh api --method DELETE "$endpoint/$id" 2>&1); then
+                if [[ "$delete_error" == *"(HTTP 404)"* ]]; then
+                  echo "Already absent: $id"
+                else
+                  printf '%s\n' "$delete_error" >&2
+                  exit 1
+                fi
+              fi
             fi
           done < <(jq -r '.[] | [.id, .name] | @tsv' <<< "$versions")
