@@ -9,6 +9,12 @@ Routine bumps (newest Go / Node / pnpm / golangci-lint plus a refreshed action
 cache) are scripted in the `runner-image-update` skill under `.agents/skills/`;
 this page is the background for what that skill does.
 
+The runner and Verdaccio S3 images also have separate GitHub Actions workflows.
+They build and push on `main` when their corresponding Dockerfile or workflow
+changes, and can be started manually from the Actions tab. The runner workflow
+publishes both the floating toolchain tag and the immutable patch tag. The
+Verdaccio workflow publishes its rolling and versioned tags.
+
 One folder per Go/Node combo lives at the repo root (e.g. `go1.27-node26/`),
 each holding a `Dockerfile` driven by `GO_VERSION` / `NODE_VERSION` /
 `PYTHON_VERSION` build args. (Only Go and Node are in the folder name; Python
