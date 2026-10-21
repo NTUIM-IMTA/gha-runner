@@ -18,7 +18,7 @@ LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 #   https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json
 #   https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
 ARG GO_VERSION=1.27.3
-ARG NODE_VERSION=26.10.0
+ARG NODE_VERSION=26.12.1
 ARG PYTHON_VERSION=3.14.8
 
 # Self-hosted runners default RUNNER_TOOL_CACHE to ~/_work/_tool (ephemeral).
@@ -149,8 +149,8 @@ RUN set -eux; \
     seed crazy-max/ghaction-github-runtime 04d248b84655b509d8c44dc1d6f990c879747487; \
     # actions/delete-package-versions@v5 (Delete-Old-Packages workflow)
     seed actions/delete-package-versions e5bc658cc4c965c472efe991f8beea3981499c55; \
-    # rjstone/discord-webhook-notify@v2 (v2.3.0; also SHA-pinned in ws-management)
-    seed rjstone/discord-webhook-notify 13eb215cbf853107dd9386c4a2f4035b7988cfc2; \
+    # rjstone/discord-webhook-notify@v2 (v2.3.1; also SHA-pinned in ws-management)
+    seed rjstone/discord-webhook-notify 132f73d6641aefdf9e0a1612c8a0ff237b9590d2; \
     chown -R runner:runner "$ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE"
 
 # 4) System libraries for Playwright's chromium, so the consumer e2e jobs can

@@ -182,8 +182,8 @@ Current repo configuration (versions from `values.yaml` and the runner Dockerfil
 | --- | --- |
 | ARC controller and runner scale set charts | `0.15.0` |
 | Runner image | `ghcr.io/ntuim-imta/gha-runner:go1.27-node26` |
-| Go toolcache | `1.27.1` |
-| Node.js toolcache | `26.10.0` |
+| Go toolcache | `1.27.3` |
+| Node.js toolcache | `26.12.1` |
 | Python toolcache | `3.14.8` |
 
 The runner image tag is floating; `imagePullPolicy: Always` checks it for each
@@ -297,12 +297,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.27.1" # matches the pre-seeded runner toolcache
+          go-version: "1.27.3" # matches the pre-seeded runner toolcache
           cache: false         # GOPROXY routes through Athens instead
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: "26.10.0" # matches the pre-seeded runner toolcache
+          node-version: "26.12.1" # matches the pre-seeded runner toolcache
           cache: false         # NPM_CONFIG_REGISTRY routes through Verdaccio
       - run: cd backend && go test -race -cover ./...
       - run: cd frontend && pnpm install --frozen-lockfile

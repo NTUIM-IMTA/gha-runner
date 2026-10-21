@@ -67,11 +67,11 @@ git pull --ff-only origin main
 
 nohup docker buildx build go1.27-node26 \
   --platform linux/amd64 \
-  --build-arg GO_VERSION=1.27.1 \
-  --build-arg NODE_VERSION=26.10.0 \
+  --build-arg GO_VERSION=1.27.3 \
+  --build-arg NODE_VERSION=26.12.1 \
   --build-arg PYTHON_VERSION=3.14.8 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.27.3-node26.12.1 \
   --push > /tmp/runner-build.log 2>&1 &
 
 tail -f /tmp/runner-build.log            # ends with "pushing manifest ... done"
@@ -87,16 +87,16 @@ and push with podman instead — it is already logged in to GHCR:
 
 ```bash
 nohup zsh -lc "podman build --pull=always --platform linux/amd64 \
-  --build-arg GO_VERSION=1.27.1 --build-arg NODE_VERSION=26.10.0 --build-arg PYTHON_VERSION=3.14.8 \
+  --build-arg GO_VERSION=1.27.3 --build-arg NODE_VERSION=26.12.1 --build-arg PYTHON_VERSION=3.14.8 \
   -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 go1.27-node26 \
-  && podman push ghcr.io/ntuim-imta/gha-runner:go1.27.1-node26.10.0 \
+  -t ghcr.io/ntuim-imta/gha-runner:go1.27.3-node26.12.1 go1.27-node26 \
+  && podman push ghcr.io/ntuim-imta/gha-runner:go1.27.3-node26.12.1 \
   && podman push ghcr.io/ntuim-imta/gha-runner:go1.27-node26 && echo DONE" \
   > /tmp/runner-build.log 2>&1 < /dev/null &
 
 # No skopeo/buildx on the host: read the pushed digests from the GHCR API (public package)
 TOK=$(curl -s "https://ghcr.io/token?scope=repository:ntuim-imta/gha-runner:pull" | jq -r .token)
-for t in go1.27-node26 go1.27.1-node26.10.0; do
+for t in go1.27-node26 go1.27.3-node26.12.1; do
   curl -sI -H "Authorization: Bearer $TOK" \
     -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
     https://ghcr.io/v2/ntuim-imta/gha-runner/manifests/$t | grep -i docker-content-digest
