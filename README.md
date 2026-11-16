@@ -591,11 +591,15 @@ the image registry.
 
 manifest：
 
-- `registry/registry.yaml` — Namespace、PVC（20Gi，`local-path`）、`registry:3`
+- `registry/registry.yaml` — Namespace、PVC（request 20Gi，`local-path`）、`registry:3`
   Deployment（已開啟 `REGISTRY_STORAGE_DELETE_ENABLED`）、`LoadBalancer:5000`
   （k3s ServiceLB 綁 node IP）。
 - `registry/gc-cronjob.yaml` — 每日 04:00 的 GC CronJob：每個 repo 保留最新 5 個
   `sha-*` tag，刪除其餘後回收 blob 空間。
+
+PVC request 為 20Gi，與叢集上已綁定的 PVC 相同；目前約使用 13.8 GB。
+`local-path` 不強制容量上限，需自行留意主機磁碟用量。PVC 綁定後不可修改
+`spec`，不要靠改 manifest 嘗試調整既有 PVC。
 
 ### node 一次性設定
 
@@ -640,6 +644,81 @@ helm chart 的 image 來源：
 
 GHCR 的舊版本清理仍由各 repo 既有的 `Delete-Old-Packages.yaml` 負責；本地
 registry 的清理則由上述 GC CronJob 處理。
+
+### 搬遷到另一台主機（計畫性）
+
+所有使用者都透過 `registry.imta.im.ntu.edu.tw:5000` 存取 registry：CI 推送、
+ArgoCD image 路徑及各節點 `/etc/rancher/k3s/registries.yaml` 都使用名稱，
+因此搬遷只需複製資料並更新 DNS，不需改這些設定。DNS 記錄位於
+`NTUIM-IMTA/dns-zonefile` 的 `db.ntuim.cc`，目前為
+`registry.imta IN A 10.1.106.110`；zone 預設 `$TTL 3600`。push 後由 cron
+執行 `dns-deploy.sh`，自動跑 `named-checkconf` 並以 `rndc reload` 套用。
+
+1. 在新主機安裝 k3s，部署 `registry/registry.yaml`，完成上方「node 一次性設定」
+   並在 PVE 防火牆開放 TCP 5000。設定新 registry 的資料 PVC 與服務就緒。
+2. 搬遷前一天將 `db.ntuim.cc` 中 registry A 記錄的 TTL 降為 60 秒並 push，
+   確認 DNS 部署完成。
+3. 保持舊 registry 可寫，先以 `regctl image copy` 或 `regsync` 透過新主機 IP
+   直連新 registry 做完整初次同步；不必搬 `*-buildcache` repo。同步來源與目的
+   使用各自的 IP 和 `:5000`，避免受 DNS 切換影響。
+4. 選擇沒有 CI 推送的時段，將舊 registry 設為唯讀，再做增量同步並切換 DNS：
+
+   ```bash
+   kubectl -n registry set env deployment/registry \
+     REGISTRY_STORAGE_MAINTENANCE_READONLY_ENABLED=true
+   ```
+
+   等 deployment rollout 完成後，用 `regsync` 或 `regctl image copy` 再同步一次，
+   將 DNS A 記錄改為新主機 IP 並 push。確認自動部署與 DNS 生效後，不要讓舊、
+   新 registry 同時接受寫入。
+5. 驗證 `dig registry.imta.im.ntu.edu.tw` 指向新 IP、
+   `curl http://registry.imta.im.ntu.edu.tw:5000/v2/_catalog` 可列出 repositories；
+   手動觸發一次 `build-image`，並確認 ArgoCD 能拉取、部署新 image。
+   CoreDNS 可能快取舊解析約 30 秒，稍候再判斷各節點結果。
+6. 在新主機套用 `registry/gc-cronjob.yaml`，確認新 GC 正常後刪除舊主機的
+   `registry-gc` CronJob，避免兩邊各自 GC。同一時間只能由目前主 registry 執行 GC。
+7. 回滾時將 DNS 改回舊 IP，並在舊主機解除唯讀：
+
+   ```bash
+   kubectl -n registry set env deployment/registry \
+     REGISTRY_STORAGE_MAINTENANCE_READONLY_ENABLED-
+   ```
+
+### 緊急切換（舊主機已失效）
+
+若沒有事先同步，新 registry 會是空的。已運行的 pod 不受影響，因為 image 已在
+各節點上；但 pod 重新排程或新部署時會因無法拉取 image 而失敗。先把 DNS 改到
+新 registry，再針對各 repo 目前部署中的 commit，以 `workflow_dispatch` 的
+`target=local` 重跑 `build-image`。image tag 由 commit SHA 產生，會與目前
+ArgoCD chart 中引用的 tag 相同；確認 push 成功後再讓 ArgoCD 部署。
+
+建議平時就在第二台 host 維持一個副 registry，由主 registry 每 10–15 分鐘透過
+`regsync` 單向同步 image（排除 `*-buildcache`）。如此主機故障時副本已有近期資料，
+切換只需更新 DNS。
+
+### 舊 registry 下線
+
+切換完成後先觀察 1–2 天，再停止舊服務：
+
+1. 確認舊 registry log 沒有健康檢查以外的請求；各 repo、chart 與節點設定沒有
+   寫死 `10.1.106.110:5000`；新 registry 已經歷一輪 CI 推送、ArgoCD 部署與 GC。
+2. 停止服務但保留資料：
+
+   ```bash
+   kubectl -n registry delete cronjob registry-gc
+   kubectl -n registry scale deployment/registry --replicas=0
+   kubectl -n registry delete svc registry
+   ```
+
+   並關閉 PVE 防火牆上舊主機 TCP 5000 的規則。若需立即回復，可將 Deployment
+   scale 回 1 並重新 apply registry Service（`kubectl apply -f registry/registry.yaml`）。
+3. 再觀察 1–2 週才刪除舊 PVC。`kubectl delete -f registry/registry.yaml` 會一併
+   刪除 PVC；`local-path` 的 Delete 回收會清除
+   `/var/lib/rancher/k3s/storage/pvc-…_registry_registry-data`。刪除前可用 `sudo`
+   備份該目錄。
+4. 最後將 DNS TTL 改回 3600，並更新本 README 中 registry 主機的說明。
+
+**不可在 DNS 切換前刪除 PVC，也不可讓新舊 registry 同時執行 GC。**
 
 ## Update / uninstall
 
