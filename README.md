@@ -102,7 +102,7 @@ helm version
 ```bash
 helm install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-  --version 0.15.0 \
+  --version 0.15.1 \
   -n arc-systems --create-namespace
 ```
 
@@ -180,7 +180,7 @@ Current repo configuration (versions from `values.yaml` and the runner Dockerfil
 
 | Component | Version / image |
 | --- | --- |
-| ARC controller and runner scale set charts | `0.15.0` |
+| ARC controller and runner scale set charts | `0.15.1` |
 | Runner image | `ghcr.io/ntuim-imta/gha-runner:go1.27-node26` |
 | Go toolcache | `1.27.3` |
 | Node.js toolcache | `26.12.1` |
@@ -237,7 +237,7 @@ yet, or has its own distinct ID, apply its group configuration:
 # Run only against the second cluster, after creating workers-2 in GitHub.
 helm upgrade my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.15.0 \
+  --version 0.15.1 \
   -n arc-runners \
   --reuse-values \
   --set runnerGroup=workers-2 \
@@ -253,7 +253,7 @@ credentials; verify the group exists and the token can access it.
 ```bash
 helm install my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.15.0 \
+  --version 0.15.1 \
   -n arc-runners \
   --set githubConfigUrl=https://github.com/NTUIM-IMTA \
   --set githubConfigSecret=gh-config \
@@ -315,7 +315,7 @@ All knobs live in `values.yaml`. After editing:
 ```bash
 helm upgrade my-runners \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.15.0 \
+  --version 0.15.1 \
   -n arc-runners \
   --reuse-values \
   -f values.yaml
@@ -342,7 +342,7 @@ Watch `kubectl top node` while runs queue; bump down on memory pressure.
 dind sidecar accepts no extra dockerd flags, and we pass `--registry-mirror`
 (see [Docker Hub mirror](#docker-hub-mirror--playwright-cdn-cache)). Instead,
 the pod template is an explicit verbatim copy of what the chart would render
-for containerMode dind on 0.15.0, plus the `[delta]`-marked additions.
+for containerMode dind on 0.15.1, plus the `[delta]`-marked additions.
 
 Removing the dind block entirely disables `docker/setup-buildx-action`, any
 `docker build`, and every `services:` block in consumer workflows ("cannot
