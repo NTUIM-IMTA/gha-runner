@@ -270,12 +270,34 @@ above:
 helm uninstall my-runners -n arc-runners --wait
 ```
 
-Keep the per-host cache and registry layout consistent with the host's role.
-The standalone-worker guidance above and [step 5](#5-apply-the-in-cluster-mirrors-and-registry)
-describe `values-worker.yaml`, optional cache services, and the registry
-destination for consumer image pushes. A host without those cache services
-must use the standalone values; cache DNS names from another cluster do not
-work across these independent clusters.
+Each host pulls the runner image from GHCR and caches it in its own cluster;
+there is no shared image cache between clusters. Configure WARP on the second
+host too, or its initial pull (about 1 GB) can be very slow; see the network
+setup below.
+
+Consumer `build-image` workflows running on self-hosted runners push images to
+`registry.imta.im.ntu.edu.tw:5000`, which resolves to `10.1.106.110` (`ws4090`).
+BuildKit's `buildcache` is stored in that same registry. Keep this as the only
+registry in the B layout: run the registry on `ws4090`, not on the second host.
+On the second host, apply the node DNS and containerd HTTP mirror setup from
+[本地 image registry](#本地-image-registry); the runner's dind
+`--insecure-registry` is already configured in `values.yaml`. WARP's default
+exclude range includes `10.0.0.0/8`, so image pushes to this private registry
+continue over the LAN. This makes `ws4090` a single point of failure: while it
+is down, the second host can still run tests, but `build-image` cannot push and
+production cannot pull newly built images. A future option is moving the
+registry to a dedicated host or pushing to GHCR instead.
+
+Athens, Verdaccio, `dockerhub-mirror`, and `playwright-cache` use ClusterIP
+services, so the second cluster cannot reach the first cluster's instances.
+The recommended setup is to deploy a local copy of these cache services in
+each cluster, following [step 5](#5-apply-the-in-cluster-mirrors-and-registry).
+Alternatively, use the existing `values-worker.yaml` standalone-worker
+settings to connect directly to upstream services, together with WARP; see
+[the standalone-worker guidance](#6-install-the-runner-scale-set). These
+options and registry setup are described in [step 5](#5-apply-the-in-cluster-mirrors-and-registry)
+and [本地 image registry](#本地-image-registry), without duplicating their
+deployment instructions here.
 
 ### Host network acceleration (Taiwan campus)
 
