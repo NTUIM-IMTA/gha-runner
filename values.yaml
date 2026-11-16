@@ -1,11 +1,14 @@
 # Override values for the gha-runner-scale-set chart
 # (oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set)
 #
-# Existing release `my-runners` in namespace `arc-runners` already supplies:
-#   githubConfigUrl:    https://github.com/NTUIM-IMTA
-#   githubConfigSecret: gh-config
-# runnerGroup is left unset, so runners register into the org's Default group.
-# Use `--reuse-values -f values.yaml` so those stay intact.
+# Pass `githubConfigUrl`, `githubConfigSecret`, and `runnerScaleSetName` on the
+# install command. Set `runnerScaleSetName` to `imta-runner-<hostname>`; scale
+# set names must be unique in the org's Default runner group. See README
+# "Multiple runner hosts".
+
+## Shared label for every cluster's scale set; consumer workflows target it.
+scaleSetLabels:
+  - imta-runner
 
 ## Single-node k3s has limited headroom: each runner pod also brings a
 ## privileged dind sidecar, so concurrent jobs scale at ~2x the pod count.

@@ -182,9 +182,9 @@ Current repo configuration (versions from `values.yaml` and the runner Dockerfil
 | --- | --- |
 | ARC controller and runner scale set charts | `0.15.1` |
 | Runner image | `ghcr.io/ntuim-imta/gha-runner:go1.27-node26` |
-| Go toolcache | `1.27.3` |
-| Node.js toolcache | `26.12.1` |
-| Python toolcache | `3.14.8` |
+| Go toolcache | `1.27.4` |
+| Node.js toolcache | `26.13.1` |
+| Python toolcache | `3.14.10` |
 
 The runner image tag is floating; `imagePullPolicy: Always` checks it for each
 new runner pod. These versions describe the repo configuration, not a check for
@@ -206,71 +206,116 @@ The runner image is pulled directly from GHCR; no local build is required.
 Workflows that push application images to the local registry still need an
 existing registry or a different push destination configured in the consumer repo.
 
-Runners register into the org's **`Default`** runner group (no `runnerGroup`
-override). A named custom group also works on this cluster, but Default keeps
-the setup simple and needs no group to be pre-created in GitHub.
+## Multiple runner hosts
 
-**Two independent clusters sharing `runs-on: my-runners`:** keep the same scale
-set name but use a different runner group in each cluster. The first can use
-`Default`; create `workers-2` in the organization's **Settings → Actions → Runner
-groups** and allow the consumer repos before installing the second cluster.
-In the install block below, add `--set runnerGroup=workers-2` and
-`--set runnerScaleSetName=my-runners` on the second cluster. The shared workflow
-does not need to specify a group. GitHub distributes jobs arbitrarily between
-eligible scale sets; it does not guarantee equal load.
-See [GitHub's multi-cluster setup](https://docs.github.com/en/actions/how-tos/manage-runners/use-actions-runner-controller/deploy-runner-scale-sets#high-availability-and-automatic-failover).
+NTUIM-IMTA is on GitHub Free and has only the `Default` runner group. GitHub
+allows only Team org owners to create additional org-level runner groups, so
+the separate-group design described in GitHub's
+[multi-cluster guide](https://docs.github.com/en/actions/how-tos/manage-runners/use-actions-runner-controller/deploy-runner-scale-sets#high-availability-and-automatic-failover)
+cannot be used here.
 
-For an existing second installation, first compare the `runner-scale-set-id`
-annotation on both clusters:
+Use **one independent k3s cluster per runner host**, each with its own ARC
+controller and runner scale set. All scale sets register in `Default`, so each
+must have a unique name within that group. Name each set
+`imta-runner-<hostname>` and assign all of them the shared `imta-runner` label
+from `values.yaml`. Consumer workflows use `runs-on: imta-runner`; GitHub can
+send a job to any eligible host, without guaranteeing even distribution.
+
+On each host, set the following before the install, upgrade, verification,
+backup, or removal commands below. The hostname must use lowercase letters,
+digits, and hyphens and fit Kubernetes/Helm naming limits; set `RUNNER_HOST`
+manually if the host's short hostname does not comply.
 
 ```bash
-kubectl -n arc-runners get autoscalingrunnerset my-runners \
-  -o jsonpath='{.metadata.annotations}{"\n"}'
+RUNNER_HOST="$(hostname -s)" # e.g. ws4090
+SCALE_SET="imta-runner-${RUNNER_HOST}"
 ```
 
-If both installations reference the same GitHub ID, resolve that shared
-registration before changing groups or uninstalling either installation; those
-operations can affect the other cluster. If the second installation has no ID
-yet, or has its own distinct ID, apply its group configuration:
+Install each host's scale set using its derived release name:
 
 ```bash
-# Run only against the second cluster, after creating workers-2 in GitHub.
-helm upgrade my-runners \
-  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-  --version 0.15.1 \
-  -n arc-runners \
-  --reuse-values \
-  --set runnerGroup=workers-2 \
-  --set runnerScaleSetName=my-runners
-```
-
-If registration stays Pending, check the ARC controller logs. A registration-token
-`403 Forbidden` indicates the credentials lack access; use an org admin's
-classic PAT with the scopes in step 4, or appropriately authorized credentials.
-`no runner group found` means ARC cannot find the configured group with those
-credentials; verify the group exists and the token can access it.
-
-```bash
-helm install my-runners \
+helm install "$SCALE_SET" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --version 0.15.1 \
   -n arc-runners \
   --set githubConfigUrl=https://github.com/NTUIM-IMTA \
   --set githubConfigSecret=gh-config \
+  --set runnerScaleSetName="$SCALE_SET" \
   -f values.yaml
 ```
+
+The scale-set label is registered with GitHub only when the scale set is
+created. Adding `scaleSetLabels` with `helm upgrade` to an existing scale set
+updates its in-cluster `AutoscalingRunnerSet` but does not update GitHub's
+registration; jobs targeting that label will remain queued. To change a
+registered label, install a new scale set under a new name, verify it receives
+a job, update consumer workflows, and only then uninstall the old set. Do not
+reuse the old name while its GitHub registration exists.
+
+Migration from the legacy `my-runners` set:
+
+1. On each host, install `imta-runner-<hostname>` as above, using the existing
+   `values.yaml` (or `values-worker.yaml` on a standalone worker).
+2. Verify its `runner-scale-set-id` and submit a test job with
+   `runs-on: imta-runner` to confirm it starts on the new set.
+3. Change consumer workflow `runs-on` values to `imta-runner`.
+4. After queued/running jobs drain and the new set is serving jobs, uninstall
+   the old scale set on its host. `my-runners` is only the legacy set during
+   this migration; do not use it for new installs.
+
+On the host that still has the legacy release, remove it only after the checks
+above:
+
+```bash
+helm uninstall my-runners -n arc-runners --wait
+```
+
+Keep the per-host cache and registry layout consistent with the host's role.
+The standalone-worker guidance above and [step 5](#5-apply-the-in-cluster-mirrors-and-registry)
+describe `values-worker.yaml`, optional cache services, and the registry
+destination for consumer image pushes. A host without those cache services
+must use the standalone values; cache DNS names from another cluster do not
+work across these independent clusters.
+
+### Host network acceleration (Taiwan campus)
+
+Campus access to GitHub/GHCR can be slow (about 340 KB/s in the measured
+environment). On `10.1.106.110`, Cloudflare WARP raised throughput to about
+9 MB/s. WARP's default bypass list does not include NTU's public address space,
+so SSH replies to clients from `140.112.x.x` may leave through WARP and break
+the connection. Add the campus range to the tunnel bypass, use tunnel-only
+mode so WARP does not take over DNS (which can disrupt k3s CoreDNS), then
+connect:
+
+```bash
+warp-cli tunnel ip add-range 140.112.0.0/16
+warp-cli mode tunnel_only
+warp-cli connect
+```
+
+For a remote first-time enablement, schedule a rollback before changing WARP;
+if the SSH session drops, it disconnects WARP after 90 seconds:
+
+```bash
+(sleep 90; warp-cli disconnect) &
+ROLLBACK_PID=$!
+```
+
+After confirming a new SSH connection succeeds, cancel that exact process with
+`kill "$ROLLBACK_PID"`. Do not use `pkill -f`: it can match the SSH shell running
+the command itself.
 
 ### 7. Verify
 
 ```bash
 kubectl -n arc-systems get pods
-kubectl -n arc-runners get autoscalingrunnerset my-runners
+kubectl -n arc-runners get autoscalingrunnerset "$SCALE_SET"
 # Also check node readiness and runner placement when adding a worker.
 kubectl get nodes -o wide
 kubectl -n arc-runners get pods -o wide
 ```
 
-In any consumer repo's workflow, set `runs-on: my-runners`.
+Consumer workflows should use `runs-on: imta-runner`.
 
 ## Workflow conventions
 
@@ -289,20 +334,30 @@ In any consumer repo's workflow, set `runs-on: my-runners`.
 
 ### Consumer workflows
 
+In each job, keep two `runs-on` lines as a pair: the active pair below uses the
+self-hosted runner by default and uses `ubuntu-latest` when
+`workflow_dispatch` targets `gha`. The commented pair is the reverse (GitHub
+hosted by default, self-hosted when dispatch targets `local`). To switch
+defaults, comment/uncomment both pairs together; keep their conditions in sync
+with the workflow's dispatch target logic.
+
 ```yaml
 jobs:
   test:
-    runs-on: my-runners
+    # Active pair: self-hosted by default; workflow_dispatch target=gha uses ubuntu-latest.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'gha' && 'ubuntu-latest' || 'imta-runner' }}
+    # Alternative pair: ubuntu-latest by default; workflow_dispatch target=local uses self-hosted.
+    # runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'local' && 'imta-runner' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.27.3" # matches the pre-seeded runner toolcache
+          go-version: "1.27.4" # matches the pre-seeded runner toolcache
           cache: false         # GOPROXY routes through Athens instead
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: "26.12.1" # matches the pre-seeded runner toolcache
+          node-version: "26.13.1" # matches the pre-seeded runner toolcache
           cache: false         # NPM_CONFIG_REGISTRY routes through Verdaccio
       - run: cd backend && go test -race -cover ./...
       - run: cd frontend && pnpm install --frozen-lockfile
@@ -313,7 +368,9 @@ jobs:
 All knobs live in `values.yaml`. After editing:
 
 ```bash
-helm upgrade my-runners \
+RUNNER_HOST="$(hostname -s)" # e.g. ws4090
+SCALE_SET="imta-runner-${RUNNER_HOST}"
+helm upgrade "$SCALE_SET" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --version 0.15.1 \
   -n arc-runners \
@@ -360,7 +417,9 @@ connect to docker daemon").
 re-diff the template block in `values.yaml`:
 
 ```bash
-helm template my-runners \
+RUNNER_HOST="$(hostname -s)" # e.g. ws4090
+SCALE_SET="imta-runner-${RUNNER_HOST}"
+helm template "$SCALE_SET" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --version <new-version> -n arc-runners \
   --set githubConfigUrl=https://github.com/NTUIM-IMTA \
@@ -563,24 +622,52 @@ registry 的清理則由上述 GC CronJob 處理。
 ## Update / uninstall
 
 ```bash
-# Upgrade ARC (controller + scale set). Helm never upgrades CRDs, so follow
+# Upgrade ARC (controller + scale set). Helm never upgrades CRDs. For most
+# upgrades, follow
 # GitHub's documented path: uninstall both, drop the actions.github.com CRDs,
 # reinstall. Do it while no jobs are queued/running (runners are gone meanwhile).
 # First re-render the dind template for <new-version> and re-diff values.yaml
 # (see "When bumping the chart version" above).
-mkdir -p ~/arc-backup && helm get values my-runners -n arc-runners -o yaml > ~/arc-backup/my-runners-values.yaml
-helm uninstall my-runners -n arc-runners --wait
+RUNNER_HOST="$(hostname -s)" # e.g. ws4090
+SCALE_SET="imta-runner-${RUNNER_HOST}"
+mkdir -p ~/arc-backup && helm get values "$SCALE_SET" -n arc-runners -o yaml > ~/arc-backup/"${SCALE_SET}"-values.yaml
+helm uninstall "$SCALE_SET" -n arc-runners --wait
 kubectl get autoscalingrunnerset,ephemeralrunnerset,ephemeralrunner,autoscalinglistener -A   # wait until empty
 helm uninstall arc -n arc-systems --wait
 kubectl get crd -o name | grep actions.github.com | xargs kubectl delete
 helm install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
   --version <new-version> -n arc-systems --wait
-helm install my-runners \
+helm install "$SCALE_SET" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --version <new-version> -n arc-runners \
   --set githubConfigUrl=https://github.com/NTUIM-IMTA --set githubConfigSecret=gh-config \
+  --set runnerScaleSetName="$SCALE_SET" \
   -f values.yaml --wait
+
+# For a patch release whose CRDs only add validation rules, an in-place upgrade
+# can avoid removing the controller/resources. First download both controller
+# charts and diff crds/: use this only when the schema changes add validation
+# bounds/length/count constraints and no other CRD or controller migration is
+# needed. Helm still does not manage CRDs during upgrade.
+# For example, ARC 0.15.0 -> 0.15.1 has identical scale-set chart templates;
+# the controller chart only adds CRD maxItems/minimum/maximum/minLength
+# validation and updates controller-gen, so that patch can use this path.
+helm pull oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --version <current-version> --untar --untardir /tmp/arc-current
+helm pull oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --version <new-version> --untar --untardir /tmp/arc-new
+diff -ru /tmp/arc-current/gha-runner-scale-set-controller/crds/ \
+  /tmp/arc-new/gha-runner-scale-set-controller/crds/
+# If the diff is limited to added validation constraints:
+kubectl apply --server-side --force-conflicts \
+  -f /tmp/arc-new/gha-runner-scale-set-controller/crds/
+helm upgrade arc \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --version <new-version> -n arc-systems --wait
+helm upgrade "$SCALE_SET" \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --version <new-version> -n arc-runners --reuse-values -f values.yaml --wait
 
 # Bump an in-cluster mirror image: apply only the workload objects. The PVC
 # specs here are immutable once bound (and local-path cannot resize), so a
@@ -592,7 +679,7 @@ print("\n---\n".join(d for d in docs if re.search(r"(?m)^kind:\s*(Deployment|Cro
 EOF
 
 # Tear down
-helm uninstall my-runners -n arc-runners
+helm uninstall "$SCALE_SET" -n arc-runners
 helm uninstall arc -n arc-systems
 kubectl delete -f athens/athens.yaml
 kubectl delete -f verdaccio/verdaccio.yaml
