@@ -485,10 +485,9 @@ SeaweedFS is `ClusterIP`-only; the trust boundary is the PVE firewall, same as
 the image registry.
 
 > **Caveats / migration.**
-> - **Verdaccio needs Verdaccio >= 7**, which currently only ships as a beta
->   (Docker Hub now tags each beta; the custom image tracks `7.0.0-next-7.30`,
->   pinned by digest). Build/push the custom image before applying
->   ([BUILD.md](BUILD.md)); a critical mirror runs on a beta here.
+> - **Verdaccio needs Verdaccio >= 7**; the custom image uses the stable `7.1.1`
+>   release, pinned by digest. Build/push the custom image before applying
+>   ([BUILD.md](BUILD.md)).
 > - **Verify Athens' `source.zip` path** after cutover: it uses minio-go's
 >   `ComposeObject` (server-side multipart copy), the classic S3-compat edge
 >   case. Smoke-test with a large module (e.g. force a fresh `pdfcpu` fetch) and

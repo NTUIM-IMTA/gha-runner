@@ -46,7 +46,7 @@ spec:
           restartPolicy: Never
           initContainers:
             - name: retention
-              image: ghcr.io/regclient/regctl:v0.11.6-alpine
+              image: ghcr.io/regclient/regctl:v0.11.7-alpine
               command: ["/bin/sh", "/scripts/retention.sh"]
               volumeMounts:
                 - name: script

@@ -114,7 +114,7 @@ spec:
     spec:
       containers:
         - name: verdaccio
-          # Custom image: stock verdaccio:7.x-next (v7 beta) + verdaccio-aws-s3-storage
+          # Custom image: stock Verdaccio 7.x + verdaccio-aws-s3-storage
           # baked in. Build/push per BUILD.md.
           image: ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
           imagePullPolicy: Always

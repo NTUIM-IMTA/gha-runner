@@ -80,9 +80,8 @@ Verdaccio's storage backend is the in-cluster SeaweedFS S3 store (see
 plugin is **not** in the stock image, so `verdaccio/Dockerfile` bakes it into a
 custom image. Rebuild this only when bumping the Verdaccio or plugin version.
 
-The plugin requires Verdaccio >= 7. Docker Hub publishes individual beta tags
-as well as the rolling `7.x-next` tag. The Dockerfile pins the chosen beta by
-both its version tag and digest.
+The plugin requires Verdaccio >= 7. The Dockerfile pins the selected stable 7.x
+release by both its version tag and digest.
 
 ```bash
 # Log in to GHCR first (see step 1 above).
@@ -90,7 +89,7 @@ docker buildx build verdaccio \
   --platform linux/amd64 \
   --provenance=false \
   -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
-  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2 \
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.1.1-s3plugin12.1.3 \
   --push
 ```
 
@@ -108,8 +107,8 @@ push the new versioned tag plus the floating tag, then restart the pod:
 ```bash
 podman build --pull=always --platform linux/amd64 \
   -t ghcr.io/ntuim-imta/verdaccio-s3:7.x-next \
-  -t ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2 verdaccio
-podman push ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2
+  -t ghcr.io/ntuim-imta/verdaccio-s3:7.1.1-s3plugin12.1.3 verdaccio
+podman push ghcr.io/ntuim-imta/verdaccio-s3:7.1.1-s3plugin12.1.3
 podman push ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
 kubectl -n verdaccio rollout restart deploy/verdaccio
 ```

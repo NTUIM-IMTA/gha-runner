@@ -130,19 +130,19 @@ RUN set -eux; \
     # actions/setup-go@v7
     seed actions/setup-go b7ad1dad31e06c5925ef5d2fc7ad053ef454303e; \
     # actions/setup-node@v7
-    seed actions/setup-node 820762786026740c76f36085b0efc47a31fe5020; \
+    seed actions/setup-node 949feb2413d6458794dcd2491c4babbbce0c15c1; \
     # actions/upload-artifact@v7
     seed actions/upload-artifact cf430e030ddbb5b0abf93d22962f4752f3646cd9; \
     # actions/setup-python@v7
-    seed actions/setup-python 5fda3b95a4ea91299a34e894583c3862153e4b97; \
+    seed actions/setup-python 6d4fd22b20465ccc0f7354476588e8df7c9ca0e0; \
     # pnpm/action-setup@v6
-    seed pnpm/action-setup 0977fd99725f1db4007ccb2928dbb4e90d06cc86; \
+    seed pnpm/action-setup 73e46992e05b19abd31f2f3c20e0e7370d762115; \
     # golangci/golangci-lint-action@v9
     seed golangci/golangci-lint-action ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a; \
     # docker/setup-buildx-action@v4
     seed docker/setup-buildx-action f87e5991a6d7451dcb8d9637bfbc97413f497069; \
     # docker/login-action@v4
-    seed docker/login-action dbcb813823bdd20940b903addbd779551569679f; \
+    seed docker/login-action 8aa5831fb8d48d8f76594c7ddde61ae58019f550; \
     # docker/metadata-action@v6
     seed docker/metadata-action dc802804100637a589fabce1cb79ff13a1411302; \
     # crazy-max/ghaction-github-runtime@v4 (also SHA-pinned to this commit in ws-management)

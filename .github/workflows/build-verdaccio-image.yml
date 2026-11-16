@@ -40,4 +40,4 @@ jobs:
           provenance: false
           tags: |
             ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
-            ghcr.io/ntuim-imta/verdaccio-s3:7.0.0-next-7.30-s3plugin12.1.2
+            ghcr.io/ntuim-imta/verdaccio-s3:7.1.1-s3plugin12.1.3

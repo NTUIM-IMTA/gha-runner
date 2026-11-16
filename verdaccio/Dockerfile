@@ -3,11 +3,9 @@
 # instead of on the non-atomic local disk that produced 0-byte package.json
 # poison-cache files. See README "Verdaccio storage: MinIO".
 #
-# The maintained verdaccio-aws-s3-storage (>= 12) requires Verdaccio >= 7, which
-# at the time of writing only ships as a beta. Docker Hub publishes individual
-# beta tags as well as the rolling `7.x-next` tag; pin both the selected beta tag
-# and its digest here for reproducibility. Node >= 24 is also required (the base
-# image satisfies it).
+# The maintained verdaccio-aws-s3-storage (>= 12) requires Verdaccio >= 7.
+# Pin the selected 7.x tag and its digest here for reproducibility. Node >= 24
+# is also required (the base image satisfies it).
 #
 # Build & push (one-time per version) — see BUILD.md.
 
@@ -27,7 +25,7 @@ RUN mkdir -p /verdaccio/plugins \
 #    (the default `plugins` dir) for a folder named verdaccio-<store-key>, so the
 #    plugin must sit there directly. Its dependencies (@aws-sdk/*, …) ride along
 #    as a sibling node_modules so the plugin's require() calls resolve.
-FROM docker.io/verdaccio/verdaccio:7.0.0-next-7.30@sha256:bbee600a0e29e714a9b79000a92a434ebb978e414793b550aac9118dabe8d6cb
+FROM docker.io/verdaccio/verdaccio:7.1.1@sha256:c826ec44b4f7bf6512b0362c5f6f199bbdc8c4348410ced7fdb7fc62f52f477e
 # Links the GHCR package to this repo (same convention as the runner image).
 LABEL org.opencontainers.image.source=https://github.com/NTUIM-IMTA/gha-runner
 COPY --chown=10001:root --from=builder \
