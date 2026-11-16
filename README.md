@@ -252,24 +252,6 @@ registered label, install a new scale set under a new name, verify it receives
 a job, update consumer workflows, and only then uninstall the old set. Do not
 reuse the old name while its GitHub registration exists.
 
-Migration from the legacy `my-runners` set:
-
-1. On each host, install `imta-runner-<hostname>` as above, using the existing
-   `values.yaml` (or `values-worker.yaml` on a standalone worker).
-2. Verify its `runner-scale-set-id` and submit a test job with
-   `runs-on: imta-runner` to confirm it starts on the new set.
-3. Change consumer workflow `runs-on` values to `imta-runner`.
-4. After queued/running jobs drain and the new set is serving jobs, uninstall
-   the old scale set on its host. `my-runners` is only the legacy set during
-   this migration; do not use it for new installs.
-
-On the host that still has the legacy release, remove it only after the checks
-above:
-
-```bash
-helm uninstall my-runners -n arc-runners --wait
-```
-
 Each host pulls the runner image from GHCR and caches it in its own cluster;
 there is no shared image cache between clusters. Configure WARP on the second
 host too, or its initial pull (about 1 GB) can be very slow; see the network
