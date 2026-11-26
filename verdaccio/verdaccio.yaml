@@ -16,6 +16,8 @@
 # is currently in beta (the custom image tracks a pinned beta release). Apply
 # seaweedfs/seaweedfs.yaml
 # first; it pre-creates the "verdaccio" bucket (the plugin does not create it).
+# The seed-index initContainer then creates the plugin's package index on an
+# empty bucket (see seed-index.mjs in the ConfigMap below).
 ---
 apiVersion: v1
 kind: Namespace
@@ -80,6 +82,45 @@ data:
       type: stdout
       format: pretty
       level: warn
+  # Run by the seed-index initContainer. On startup the S3 plugin HEADs its
+  # package index (verdaccio-s3-db.json) in a detached promise and rethrows
+  # NotFound, which kills the process: on an empty bucket Verdaccio crash-loops
+  # forever. Create an empty index only when the key is missing — never
+  # overwrite, or the existing package list and secret would be lost.
+  # The key matches the plugin's LOCAL_STORAGE_KEY with no keyPrefix set above;
+  # seaweedfs/cache-gc-cronjob.yaml excludes the same key from eviction.
+  seed-index.mjs: |
+    import { createRequire } from "node:module";
+
+    const require = createRequire("/verdaccio/plugins/verdaccio-aws-s3-storage/");
+    const { S3Client, HeadObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+
+    const bucket = "verdaccio";
+    const key = "verdaccio-s3-db.json";
+    const s3 = new S3Client({
+      region: "us-east-1",
+      endpoint: "http://seaweedfs.seaweedfs.svc.cluster.local:8333",
+      forcePathStyle: true,
+    });
+
+    function isNotFound(err) {
+      return err instanceof Error && (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404);
+    }
+
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      console.log(`s3://${bucket}/${key} exists, leaving it untouched`);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+      // Same shape as the plugin's in-memory default (secret, list, tokens).
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentType: "application/json",
+        Body: JSON.stringify({ secret: "", list: [], tokens: [] }),
+      }));
+      console.log(`created empty s3://${bucket}/${key}`);
+    }
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -112,6 +153,22 @@ spec:
       labels:
         app: verdaccio
     spec:
+      initContainers:
+        ## Seed the plugin's package index on a fresh bucket; see
+        ## seed-index.mjs in the ConfigMap. Same image, so the AWS SDK and
+        ## credentials match what the plugin uses. With replicas: 1 and the
+        ## Recreate strategy only one pod runs this at a time, so the
+        ## HEAD-then-PUT check cannot race another writer.
+        - name: seed-index
+          image: ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
+          imagePullPolicy: Always
+          command: ["node", "/verdaccio/conf/seed-index.mjs"]
+          envFrom:
+            - secretRef:
+                name: seaweedfs-credentials
+          volumeMounts:
+            - name: config
+              mountPath: /verdaccio/conf
       containers:
         - name: verdaccio
           # Custom image: stock Verdaccio 7.x + verdaccio-aws-s3-storage
