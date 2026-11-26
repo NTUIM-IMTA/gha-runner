@@ -159,6 +159,12 @@ also self-creates `gomods` as a backstop); verify with:
 kubectl -n seaweedfs exec deploy/seaweedfs -- sh -c "echo s3.bucket.list | weed shell"
 ```
 
+On a fresh `verdaccio` bucket, the S3 plugin crashes at startup because its
+package index `verdaccio-s3-db.json` does not exist yet. The Deployment's
+`seed-index` initContainer creates an empty index when the key is missing and
+leaves an existing one untouched; check its result with
+`kubectl -n verdaccio logs deploy/verdaccio -c seed-index`.
+
 See [Object storage: SeaweedFS](#object-storage-seaweedfs) for why both proxies
 use object storage rather than local disk, and the note that **Verdaccio needs
 the custom S3 image built first** ([BUILD.md](BUILD.md)).
