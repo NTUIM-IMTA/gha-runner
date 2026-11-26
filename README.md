@@ -179,7 +179,9 @@ node setup, the daily GC CronJob, and how each app's build wires into it.
 `values.yaml` carries the runner image, the explicit dind sidecar (with the
 Docker Hub mirror wiring), `maxRunners`, `GOPROXY`, `NPM_CONFIG_REGISTRY`,
 and `PLAYWRIGHT_DOWNLOAD_HOST` — the chart picks up the rest from the
-controller install. The image it pins is prebuilt and public on GHCR; rebuilding it is a
+controller install. The runner container runs with an `Unconfined` AppArmor
+profile: on Ubuntu 26.04 hosts containerd's default profile denies signals
+between processes in one container, which breaks vitest and SIGTERM tests. The image it pins is prebuilt and public on GHCR; rebuilding it is a
 one-time task — see [Appendix: Building the runner image](BUILD.md).
 
 Current repo configuration (versions from `values.yaml` and the runner Dockerfile):

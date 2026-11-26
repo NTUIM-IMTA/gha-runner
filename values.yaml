@@ -75,6 +75,15 @@ template:
         image: ghcr.io/ntuim-imta/gha-runner:go1.27-node26
         imagePullPolicy: Always
         command: ["/home/runner/run.sh"]
+        ## [delta] Run the job container without containerd's default AppArmor
+        ## profile. On Ubuntu 26.04 hosts (kernel 7.0, containerd 2.3) that
+        ## profile denies signals between processes in the same container, so
+        ## `kill` of a job's own child fails with EACCES: vitest cannot stop its
+        ## forks workers and tests that send SIGTERM fail. The dind sidecar is
+        ## already privileged; jobs here are trusted org workflows.
+        securityContext:
+          appArmorProfile:
+            type: Unconfined
         env:
           ## Route `go mod download` through the in-cluster Athens proxy.
           ## Unlike ACTIONS_RESULTS_URL, GOPROXY is read by the Go toolchain
