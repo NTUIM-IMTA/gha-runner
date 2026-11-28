@@ -68,7 +68,14 @@ data:
         url: https://registry.npmjs.org/
         cache: true
         timeout: 30s
-        maxage: 10m
+        # How long cached metadata is served before Verdaccio revalidates it
+        # upstream. Each revalidation re-parses and re-writes the full
+        # packument (typescript's is ~16 MB), and with 10m every CI burst
+        # revalidated all ~700 packages, pinning the single Node process.
+        # Safe while it stays below pnpm's minimumReleaseAge (built-in default
+        # 1440 min): any version a lockfile may hold was published more than a
+        # day ago, so it is already in a packument cached within 6h.
+        maxage: 6h
     packages:
       '@*/*':
         access: $all
@@ -191,15 +198,25 @@ spec:
               mountPath: /verdaccio/storage
             - name: config
               mountPath: /verdaccio/conf
+          ## A busy Verdaccio answers /-/ping slowly but is still serving. With
+          ## the default 1s timeout / 3 failures it was marked unready during
+          ## every CI burst, the Service dropped its only endpoint, and pnpm's
+          ## metadata requests stalled for 30s+ in retries. Tolerate ~1 min of
+          ## slow pings before pulling it.
           readinessProbe:
             httpGet:
               path: /-/ping
               port: 4873
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
-              cpu: 50m
+              ## Runner pods have no CPU requests and use 10+ cores each under
+              ## load; a full core keeps the single-threaded registry
+              ## responsive while the node is saturated.
+              cpu: "1"
               memory: 256Mi
             limits:
               memory: 4Gi
