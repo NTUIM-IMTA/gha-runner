@@ -39,20 +39,24 @@ gh auth token | docker login ghcr.io -u "$GH_USER" --password-stdin
 
 ## 2. Build & push
 
+The normal path is CI: push the Dockerfile change to `main` and
+`Build runner image` builds and pushes both tags. The manual build below is
+the fallback when CI is unavailable.
+
 Versions must match the latest patch in
 [actions/go-versions](https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json)
 [actions/node-versions](https://raw.githubusercontent.com/actions/node-versions/main/versions-manifest.json)
 and
-[actions/python-versions](https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json):
+[actions/python-versions](https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json).
+Set them as the Dockerfile `ARG` defaults (CI passes no build args), then:
 
 ```bash
+df=go1.27-node26/Dockerfile
+GO=$(sed -n 's/^ARG GO_VERSION=//p' $df); NODE=$(sed -n 's/^ARG NODE_VERSION=//p' $df)
 docker buildx build go1.27-node26 \
   --platform linux/amd64 \
-  --build-arg GO_VERSION=1.27.3 \
-  --build-arg NODE_VERSION=26.12.1 \
-  --build-arg PYTHON_VERSION=3.14.8 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.27-node26 \
-  -t ghcr.io/ntuim-imta/gha-runner:go1.27.3-node26.12.1 \
+  -t ghcr.io/ntuim-imta/gha-runner:go${GO%.*}-node${NODE%%.*} \
+  -t ghcr.io/ntuim-imta/gha-runner:go${GO}-node${NODE} \
   --push
 ```
 
@@ -67,8 +71,10 @@ with no helm change.
    whose `platform_version` matches the base image's `/etc/os-release`, so a
    base-image OS bump needs no edit here.
 2. Create a new folder `goX.Y-nodeZ/` and copy/edit the `Dockerfile` ARGs.
-3. Build & push with both the floating tag (`goX.Y-nodeZ`) and the immutable
-   tag (`goX.Y.Z-nodeA.B.C`) using the command above.
+   Point `.github/workflows/build-runner-image.yml` (`paths`, `dockerfile=`,
+   `context:`) at the new folder, or CI will not build it.
+3. Push to `main`; CI pushes both the floating tag (`goX.Y-nodeZ`) and the
+   immutable tag (`goX.Y.Z-nodeA.B.C`).
 4. Update `template.spec.containers[0].image` in `values.yaml`, then run the
    `helm upgrade` from the README's tuning section.
 5. Keep the old folder until no workflow pins it.

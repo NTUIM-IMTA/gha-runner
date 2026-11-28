@@ -128,7 +128,7 @@ RUN set -eux; \
     # actions/checkout@v7
     seed actions/checkout 3d3c42e5aac5ba805825da76410c181273ba90b1; \
     # actions/setup-go@v7
-    seed actions/setup-go b7ad1dad31e06c5925ef5d2fc7ad053ef454303e; \
+    seed actions/setup-go d8cbb8045d7f43706b9177cceb36c1f91a6644d5; \
     # actions/setup-node@v7
     seed actions/setup-node 949feb2413d6458794dcd2491c4babbbce0c15c1; \
     # actions/upload-artifact@v7
