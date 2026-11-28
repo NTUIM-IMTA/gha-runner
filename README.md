@@ -403,8 +403,10 @@ jobs:
 All knobs live in `values.yaml`. After editing:
 
 ```bash
-RUNNER_HOST="$(hostname -s)" # e.g. ws4090
-SCALE_SET="imta-runner-${RUNNER_HOST}"
+# Use the installed release name; it is not always derivable from the
+# hostname (10.1.106.110 reports `nekoneko` but its release is
+# imta-runner-ws4090; 10.1.106.109 is imta-runner-arc-runner).
+SCALE_SET="$(helm list -n arc-runners -q | grep '^imta-runner-')"
 helm upgrade "$SCALE_SET" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --version 0.15.1 \
@@ -412,6 +414,18 @@ helm upgrade "$SCALE_SET" \
   --reuse-values \
   -f values.yaml
 ```
+
+> **Trust boundary of the shared cache.** Every job on a host reads and writes
+> the same `/var/lib/gha-cache`, across repositories. A job that writes a
+> poisoned Go build-cache entry, pnpm store file or Playwright binary can affect
+> later jobs of any repo on that host. This is acceptable only because every
+> consumer repo is private, members cannot fork private repos, and the runner
+> group must not allow public repositories (Org settings → Actions → Runner
+> groups → Default → "Allow public repositories" off; gha-runner itself is
+> public and builds on `ubuntu-latest`). Images that get deployed are built
+> inside dind with `docker build`, which does not mount this cache. If an
+> untrusted repo or fork PR ever needs these runners, give it a separate scale
+> set without the cache volume.
 
 Runner cache directories live at `/var/lib/gha-cache` on each host and mount
 at `/opt/gha-cache` in runner pods. `values.yaml` sets `GOCACHE`, `GOMODCACHE`,
