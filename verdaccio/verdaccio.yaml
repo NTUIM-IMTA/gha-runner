@@ -149,9 +149,17 @@ metadata:
   labels:
     app: verdaccio
 spec:
-  replicas: 1
+  # Verdaccio is one single-threaded Node process. On the EPYC 7402 host
+  # (ws4090, 10.1.106.110), one process saturates a core when two CI installs
+  # overlap. Metadata and tarballs live in shared S3, so several processes can
+  # serve the same data. Concurrent refreshes of one packument are last-writer-
+  # wins atomic PutObjects with identical upstream content.
+  replicas: 3
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: verdaccio
@@ -163,9 +171,9 @@ spec:
       initContainers:
         ## Seed the plugin's package index on a fresh bucket; see
         ## seed-index.mjs in the ConfigMap. Same image, so the AWS SDK and
-        ## credentials match what the plugin uses. With replicas: 1 and the
-        ## Recreate strategy only one pod runs this at a time, so the
-        ## HEAD-then-PUT check cannot race another writer.
+        ## credentials match what the plugin uses. The HEAD-then-PUT may race
+        ## only while the bucket is empty on first install; at worst two pods
+        ## write the same empty index. Once present, every pod leaves it alone.
         - name: seed-index
           image: ghcr.io/ntuim-imta/verdaccio-s3:7.x-next
           imagePullPolicy: Always

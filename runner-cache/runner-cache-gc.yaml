@@ -1,0 +1,58 @@
+# Weekly size caps for persistent runner caches on each runner host.
+# Apply once in each cluster: ws4090 (10.1.106.110) and arc-runner
+# (10.1.106.109). Caps leave room for active CI while bounding disk use.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: runner-cache-gc
+  namespace: arc-runners
+spec:
+  schedule: "0 4 * * 0"
+  timeZone: Asia/Taipei
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: gc
+              image: busybox:1.38
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Caps in GiB: go-build 10 (Go trims old entries itself),
+                  # go-mod 10, golangci-lint 2, pnpm-store 20, pnpm-cache 2,
+                  # and ms-playwright 10. The latter five do not self-trim.
+                  check_cap() {
+                    dir="/cache/$1"
+                    cap_gib="$2"
+                    [ -d "$dir" ] || return 0
+                    used_kib=$(du -sk "$dir" | cut -f1)
+                    cap_kib=$((cap_gib * 1024 * 1024))
+                    echo "$1: ${used_kib} KiB used; cap ${cap_gib} GiB"
+                    if [ "$used_kib" -gt "$cap_kib" ]; then
+                      echo "$1 exceeds cap; emptying cache contents"
+                      find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+                    fi
+                  }
+                  # Emptying a cache during a job only makes that job
+                  # re-download or rebuild; run at the quietest weekly hour.
+                  check_cap go-build 10
+                  check_cap go-mod 10
+                  check_cap golangci-lint 2
+                  check_cap pnpm-store 20
+                  check_cap pnpm-cache 2
+                  check_cap ms-playwright 10
+              volumeMounts:
+                - name: cache
+                  mountPath: /cache
+          volumes:
+            - name: cache
+              hostPath:
+                path: /var/lib/gha-cache
+                type: DirectoryOrCreate

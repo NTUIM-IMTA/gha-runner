@@ -23,6 +23,8 @@ Self-hosted GitHub Actions runners for NTUIM-IMTA, running on k3s via
 │   └── dockerhub-mirror.yaml
 ├── playwright-cache/  # Playwright browser CDN cache (CI e2e jobs)
 │   └── playwright-cache.yaml
+├── runner-cache/    # persistent hostPath runner caches + weekly size GC
+│   └── runner-cache-gc.yaml
 ├── registry/        # in-cluster image registry + daily GC cronjob
 │   ├── registry.yaml
 │   └── gc-cronjob.yaml
@@ -144,6 +146,23 @@ kubectl -n dockerhub-mirror rollout status deploy/dockerhub-mirror
 kubectl -n playwright-cache rollout status deploy/playwright-cache
 ```
 
+Apply the runner cache cleanup CronJob in **both** runner clusters (ws4090,
+`10.1.106.110`, and arc-runner, `10.1.106.109`):
+
+```bash
+kubectl apply -f runner-cache/runner-cache-gc.yaml
+```
+
+Runner pods mount each host's `/var/lib/gha-cache` at `/opt/gha-cache`; a pod
+init container creates the cache directories and gives them to `runner`. The
+weekly Sunday 04:00 Asia/Taipei CronJob empties an individual directory only
+when it exceeds its cap: 10 GiB Go build, 10 GiB Go modules, 2 GiB
+golangci-lint, 20 GiB pnpm store, 2 GiB pnpm metadata, and 10 GiB Playwright
+browsers. If a job is using a cache while it is emptied, it only needs to
+download or rebuild those contents. To reset a cache manually on the
+corresponding host, run `sudo rm -rf /var/lib/gha-cache/<dir>`; the next pod
+recreates it with the right ownership.
+
 **Registry host only — skip this block on a standalone worker:**
 
 ```bash
@@ -176,9 +195,8 @@ node setup, the daily GC CronJob, and how each app's build wires into it.
 
 ### 6. Install the runner scale set
 
-`values.yaml` carries the runner image, the explicit dind sidecar (with the
-Docker Hub mirror wiring), `maxRunners`, `GOPROXY`, `NPM_CONFIG_REGISTRY`,
-and `PLAYWRIGHT_DOWNLOAD_HOST` — the chart picks up the rest from the
+`values.yaml` carries the runner image, explicit dind sidecar (with the Docker
+Hub mirror wiring), `maxRunners`, proxy settings, and persistent cache paths — the chart picks up the rest from the
 controller install. The runner container runs with an `Unconfined` AppArmor
 profile: on Ubuntu 26.04 hosts containerd's default profile denies signals
 between processes in one container, which breaks vitest and SIGTERM tests. The image it pins is prebuilt and public on GHCR; rebuilding it is a
@@ -193,6 +211,11 @@ Current repo configuration (versions from `values.yaml` and the runner Dockerfil
 | Go toolcache | `1.27.4` |
 | Node.js toolcache | `26.13.1` |
 | Python toolcache | `3.14.10` |
+
+Verdaccio runs three replicas with a rolling update (`maxUnavailable: 0`,
+`maxSurge: 1`) on each host. Its workers share metadata and tarballs in S3;
+three single-threaded Node processes let overlapping installs use separate
+cores without taking the registry offline during an update.
 
 The runner image tag is floating; `imagePullPolicy: Always` checks it for each
 new runner pod. These versions describe the repo configuration, not a check for
@@ -390,6 +413,15 @@ helm upgrade "$SCALE_SET" \
   -f values.yaml
 ```
 
+Runner cache directories live at `/var/lib/gha-cache` on each host and mount
+at `/opt/gha-cache` in runner pods. `values.yaml` sets `GOCACHE`, `GOMODCACHE`,
+`GOLANGCI_LINT_CACHE`, `PNPM_CONFIG_STORE_DIR`, `PNPM_CONFIG_CACHE_DIR`,
+`PNPM_CONFIG_PREFER_OFFLINE=true`, and `PLAYWRIGHT_BROWSERS_PATH` to their
+matching subdirectories. The weekly `runner-cache/runner-cache-gc.yaml` CronJob
+bounds all six directories by size; apply it in both clusters after installing
+the scale set. To clear one cache, run `sudo rm -rf /var/lib/gha-cache/<dir>`
+on that host; the next pod recreates and re-owns the directory.
+
 ### Concurrency cap (`maxRunners`)
 
 ```yaml
@@ -486,6 +518,7 @@ downloads repeat on every single run:
 |---|---|---|
 | `services:` images (postgres, redis, …) | `dockerhub-mirror/` — registry:3 pull-through cache | dind `--registry-mirror` flag in `values.yaml` |
 | `playwright install chromium` (~170 MB) | `playwright-cache/` — nginx `proxy_cache` in front of `cdn.playwright.dev` | `PLAYWRIGHT_DOWNLOAD_HOST` env in `values.yaml` |
+| Go build/modules, golangci-lint, pnpm store/metadata, Playwright browsers | `/var/lib/gha-cache` on each host, mounted at `/opt/gha-cache` | cache env vars in `values.yaml`; weekly size GC manifest in `runner-cache/` |
 | chromium system libs / qpdf + ghostscript | baked into the runner image ([BUILD.md](BUILD.md)) | e2e jobs pass `--with-deps` only on the `gha` target |
 
 Notes:

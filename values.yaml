@@ -27,6 +27,25 @@ maxRunners: 8
 template:
   spec:
     initContainers:
+      ## [delta] Prepare persistent cache directories once per pod. The image
+      ## defines runner (uid 1001; primary group runner) in its upstream base.
+      ## Resolve names in-image and chown only these top-level directories so
+      ## startup cost stays independent of cache size.
+      - name: init-gha-cache
+        image: ghcr.io/ntuim-imta/gha-runner:go1.27-node26
+        securityContext:
+          runAsUser: 0
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -eu
+            for dir in go-build go-mod golangci-lint pnpm-store pnpm-cache ms-playwright; do
+              mkdir -p "/opt/gha-cache/$dir"
+              chown runner:runner "/opt/gha-cache/$dir"
+            done
+        volumeMounts:
+          - name: gha-cache
+            mountPath: /opt/gha-cache
       - name: init-dind-externals
         image: ghcr.io/ntuim-imta/gha-runner:go1.27-node26
         command: ["cp"]
@@ -99,6 +118,22 @@ template:
           ## fallback chain — see that manifest's header.
           - name: PLAYWRIGHT_DOWNLOAD_HOST
             value: http://playwright-cache.playwright-cache.svc.cluster.local
+          ## [delta] Persistent host cache shared across ephemeral runner pods. See
+          ## README's persistent runner caches section for each directory.
+          - name: GOCACHE
+            value: /opt/gha-cache/go-build
+          - name: GOMODCACHE
+            value: /opt/gha-cache/go-mod
+          - name: GOLANGCI_LINT_CACHE
+            value: /opt/gha-cache/golangci-lint
+          - name: PNPM_CONFIG_STORE_DIR
+            value: /opt/gha-cache/pnpm-store
+          - name: PNPM_CONFIG_CACHE_DIR
+            value: /opt/gha-cache/pnpm-cache
+          - name: PNPM_CONFIG_PREFER_OFFLINE
+            value: "true"
+          - name: PLAYWRIGHT_BROWSERS_PATH
+            value: /opt/gha-cache/ms-playwright
           ## The two below are what containerMode dind used to inject.
           - name: DOCKER_HOST
             value: unix:///var/run/docker.sock
@@ -109,6 +144,9 @@ template:
             mountPath: /home/runner/_work
           - name: dind-sock
             mountPath: /var/run
+          ## [delta] Persistent cache storage shared across runner pods on this node.
+          - name: gha-cache
+            mountPath: /opt/gha-cache
         # If the package is private, add an imagePullSecret here.
     volumes:
       - name: dind-sock
@@ -117,3 +155,8 @@ template:
         emptyDir: {}
       - name: work
         emptyDir: {}
+      ## [delta] Node-local persistent caches for ephemeral runner pods.
+      - name: gha-cache
+        hostPath:
+          path: /var/lib/gha-cache
+          type: DirectoryOrCreate
